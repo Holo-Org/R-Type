@@ -1,0 +1,2264 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>R-Type Netcode Simulator</title>
+<style>
+/* Layout: a test bench. A sticky transport bar on top; the live screens and meters on the left,
+   the free-play controls and guided walkthroughs in a sticky column on the right; one column on phones. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --sunken: #eaeef4;
+  --fg: #141821;
+  --muted: #586173;
+  --line: #d7dce6;
+  --accent: #2350d4;
+  --accent-ink: #ffffff;
+  --accent-soft: #e4eafb;
+  --bad: #b3302a;
+  --bad-soft: #f8e7e5;
+  --good: #1c7047;
+  --screen: #0a0d14;
+  --screen-grid: #171d2a;
+  --screen-truth: #8d97aa;
+  --screen-view: #7ba1ff;
+  --screen-bad: #ff6b5d;
+  --screen-text: #cfd5e0;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.875rem;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1117;
+    --surface: #161a22;
+    --sunken: #1c212b;
+    --fg: #e5e8ee;
+    --muted: #98a1b2;
+    --line: #2a303c;
+    --accent: #83a5ff;
+    --accent-ink: #0a0f1d;
+    --accent-soft: #1d2640;
+    --bad: #ff7d71;
+    --bad-soft: #3a1f1f;
+    --good: #62cf95;
+    --screen: #06080d;
+    --screen-grid: #141926;
+    --screen-truth: #7f8a9e;
+    --screen-view: #7ba1ff;
+    --screen-bad: #ff6b5d;
+    --screen-text: #cfd5e0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1117;
+  --surface: #161a22;
+  --sunken: #1c212b;
+  --fg: #e5e8ee;
+  --muted: #98a1b2;
+  --line: #2a303c;
+  --accent: #83a5ff;
+  --accent-ink: #0a0f1d;
+  --accent-soft: #1d2640;
+  --bad: #ff7d71;
+  --bad-soft: #3a1f1f;
+  --good: #62cf95;
+  --screen: #06080d;
+  --screen-grid: #141926;
+  --screen-truth: #7f8a9e;
+  --screen-view: #7ba1ff;
+  --screen-bad: #ff6b5d;
+  --screen-text: #cfd5e0;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: var(--fs-md); line-height: 1.5; -webkit-text-size-adjust: 100%; }
+table { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
+h1, h2, h3, h4 { margin: 0; line-height: 1.25; text-wrap: balance; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.page { max-width: 1520px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 72px; display: grid; gap: 28px; }
+@media (min-width: 760px) { .page { padding-inline: 28px; } }
+
+/* Intro */
+.intro { display: grid; gap: 18px; }
+.eyebrow { font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--bad); font-weight: 650; }
+h1 { font-family: var(--font-mono); font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.01em; }
+.question { font-size: var(--fs-lg); max-width: 70ch; }
+.question strong { font-weight: 600; }
+.approaches { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 560px) { .approaches { grid-template-columns: repeat(2, minmax(0, 1fr)); } .approach.wide { grid-column: span 2; } }
+@media (min-width: 900px) { .approaches { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .approaches { grid-template-columns: repeat(5, minmax(0, 1fr)); } .approach.wide { grid-column: auto; } }
+.approach { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.approach h2 { font-size: var(--fs-md); display: flex; gap: 10px; align-items: baseline; }
+.letter { font-family: var(--font-mono); font-weight: 700; color: var(--accent); min-width: 1.2em; }
+.approach p, .approach li { font-size: var(--fs-sm); color: var(--muted); }
+.approach ul { margin: 2px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+
+/* Transport bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); margin-inline: -16px; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+@media (min-width: 760px) { .bar { margin-inline: -28px; padding-inline: 28px; } }
+.transport { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.clock { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-sm); color: var(--muted); }
+.mirror { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; font-size: var(--fs-sm); min-width: 0; }
+@media (max-width: 560px) {
+  .bar { gap: 6px 12px; padding-block: 8px; }
+  .bar .btn { padding: 5px 10px; }
+  .mirror { margin-left: 0; }
+}
+.mirror span { color: var(--muted); }
+
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 6px; padding: 6px 12px; cursor: pointer; line-height: 1.3; text-align: left; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:focus-visible, select:focus-visible, input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { color: var(--bad); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.small { padding: 4px 10px; font-size: var(--fs-sm); }
+select, input[type="number"] { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+input[type="range"] { accent-color: var(--accent); width: 100%; }
+
+/* Bench */
+.bench { display: grid; gap: 28px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1150px) {
+  .bench { grid-template-columns: minmax(0, 1fr) 370px; }
+  .side { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 72px); max-height: calc(100vh - 88px); overflow-y: auto; padding-right: 4px; }
+}
+.state { display: grid; gap: 18px; min-width: 0; }
+.side { display: grid; gap: 18px; min-width: 0; align-content: start; }
+.section-h { font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+/* What just happened */
+.callout { background: var(--sunken); border-radius: var(--r); padding: 12px 16px; display: grid; gap: 8px; }
+.callout ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.callout li, .log li { display: grid; grid-template-columns: 4.6em minmax(0, 1fr); gap: 10px; font-size: var(--fs-sm); }
+.callout .empty { color: var(--muted); font-size: var(--fs-sm); }
+.when { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--fs-xs); padding-top: 2px; }
+.lvl-bad .what { color: var(--bad); }
+.lvl-good .what { color: var(--good); }
+.tag { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); margin-right: 6px; }
+.who { font-weight: 600; margin-right: 4px; }
+
+/* Scoreboard */
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.score { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.score th, .score td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.score tr:last-child th, .score tr:last-child td { border-bottom: 0; }
+.score thead th { font-weight: 600; color: var(--fg); }
+.score tbody th { font-weight: 400; color: var(--muted); }
+.score td { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .score { font-size: var(--fs-xs); }
+  .score th, .score td { padding: 6px 8px; }
+  .score tbody th { width: 40%; }
+}
+.is-bad { color: var(--bad); }
+
+/* Worlds */
+.legend { background: var(--screen); color: var(--screen-text); border-radius: var(--r); padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--fs-sm); }
+.legend span { display: inline-flex; gap: 8px; align-items: center; }
+.legend span.note { display: inline; }
+.sw { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
+.sw.view { background: var(--screen-view); }
+.sw.truth { border: 1.5px solid var(--screen-truth); }
+.sw.lost { border: 1.5px dashed var(--screen-bad); }
+.sw.stuck { background: var(--screen-bad); }
+.sw.fx { border: 1.5px solid var(--screen-view); background: transparent; }
+.worlds { display: grid; gap: 22px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .worlds.two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.world { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.world-h { display: grid; gap: 2px; }
+.world-h h3 { font-size: var(--fs-lg); display: flex; gap: 10px; align-items: baseline; }
+.world-h p { font-size: var(--fs-sm); color: var(--muted); }
+.server { display: grid; gap: 10px; }
+.worlds:not(.two) .server { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .worlds:not(.two) .server { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; } }
+.screen { margin: 0; display: grid; gap: 4px; }
+.screen canvas { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 6px; background: var(--screen); }
+.screen figcaption { font-size: var(--fs-xs); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.screen figcaption b { color: var(--fg); font-weight: 600; }
+.clients { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 225px), 1fr)); }
+.client { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: var(--fs-xs); }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.server .kv { font-size: var(--fs-sm); }
+.armed { font-size: var(--fs-xs); color: var(--bad); }
+
+/* Log */
+.log { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 16px; }
+.log summary { cursor: pointer; font-weight: 600; font-size: var(--fs-sm); }
+.log ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; max-height: 340px; overflow-y: auto; }
+
+/* Panels (free play, walkthroughs) */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 14px; }
+.panel h2 { font-size: var(--fs-lg); }
+.group { display: grid; gap: 8px; }
+.group h3 { font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.row2 { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field { display: grid; gap: 2px; font-size: var(--fs-sm); min-width: 0; }
+.field .lab { display: flex; justify-content: space-between; gap: 8px; }
+.field .lab span:first-child { color: var(--muted); }
+.field output { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.field select, .field input[type="number"] { width: 100%; }
+.hint { font-size: var(--fs-xs); color: var(--muted); }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tab { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-size: var(--fs-xs); cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); font-weight: 600; }
+.walk { display: grid; gap: 10px; }
+.walk h3 { font-size: var(--fs-md); }
+.walk p { font-size: var(--fs-sm); }
+.walk .watch { color: var(--muted); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: step; }
+.steps li { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); gap: 4px 8px; counter-increment: step; }
+.steps li::before { content: counter(step); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); padding-top: 6px; text-align: right; }
+.steps .btn { width: 100%; }
+.steps .note { grid-column: 2; font-size: var(--fs-xs); color: var(--muted); }
+.steps li.done .btn { background: var(--sunken); border-color: var(--sunken); }
+.steps li.done::before { content: "\2713"; color: var(--good); }
+.steps li.todo .note { opacity: 0.7; }
+
+/* Assumptions */
+.assume { display: grid; gap: 18px; }
+.assume-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 700px) { .assume-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .assume-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.card.full { grid-column: 1 / -1; }
+.defs { display: grid; gap: 10px 28px; grid-template-columns: minmax(0, 1fr); margin: 0; font-size: var(--fs-sm); }
+@media (min-width: 700px) { .defs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .defs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.defs div { display: grid; gap: 2px; align-content: start; }
+.defs dt { font-weight: 600; }
+.defs dd { margin: 0; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.card h3 { font-size: var(--fs-md); }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: var(--fs-sm); }
+.card p { font-size: var(--fs-sm); }
+.bytes { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.bytes th, .bytes td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.bytes td:last-child { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.bytes th { color: var(--muted); font-weight: 500; }
+.live-size { font-family: var(--font-mono); font-size: var(--fs-xs); background: var(--sunken); border-radius: 6px; padding: 8px 10px; overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="page">
+  <header class="intro">
+    <p class="eyebrow">R-Type · netcode prototype · <b>throwaway, not production code</b></p>
+    <h1>Netcode Simulator</h1>
+    <p class="question"><strong>For each replication approach, what does each Client actually see compared with the Server's truth, how late is it, how much bandwidth does it use, and what breaks, under latency, jitter, loss, duplication, reordering and a bandwidth cap?</strong></p>
+    <p class="question" style="font-size: var(--fs-md); color: var(--muted);">An authoritative Server runs the Match at 60 Ticks per second. Each Client shows what it has received. Below, the same Match runs through a simulated network; you pick how the Server and the Clients talk, then break the network and watch what each Client believes. Everything is seeded, so a scenario replays identically. Two approaches can run side by side on the same network conditions.</p>
+    <div class="approaches">
+      <article class="approach wide">
+        <h2><span class="letter">A</span>Event stream</h2>
+        <p>The Server sends a message for everything that happens: an Enemy spawned, moved, fired or was destroyed, a Ship was destroyed, a Player moved or shot. The Client builds its picture of the Match from these messages alone.</p>
+        <ul>
+          <li><b>Unreliable:</b> each message is sent once. If it is lost, it is gone: an Enemy that never appears, or one that never dies.</li>
+          <li><b>Reliable and ordered:</b> the Client confirms what it got, the Server resends the rest, and the Client applies messages strictly in order. One lost message holds back everything behind it until its resend arrives.</li>
+        </ul>
+      </article>
+      <article class="approach">
+        <h2><span class="letter">B</span>Snapshots</h2>
+        <p>Every Tick, each Client sends the keys its Player holds (one byte), repeating its last few inputs in every packet. Every K Ticks the Server sends each Client the position of every entity, unreliably. The Client keeps only the newest snapshot, so a lost one is simply replaced by the next. Spawns and deaths need no message: things appear in or vanish from the list.</p>
+      </article>
+      <article class="approach">
+        <h2><span class="letter">C</span>Hybrid</h2>
+        <p>B, plus a small reliable channel (confirmations and resends) for what a Player must not miss: a Player joined, left or timed out, an explosion, a Ship destroyed, game over. What is on screen never waits for this channel.</p>
+      </article>
+      <article class="approach">
+        <h2><span class="letter">D</span>TCP-like</h2>
+        <p>The same snapshots as B, but on one reliable, ordered stream on the same lossy link, which is what TCP gives you. A lost packet is resent after a timeout, and everything sent after it waits until it arrives: head-of-line blocking.</p>
+      </article>
+      <article class="approach">
+        <h2><span class="letter">E</span>Lockstep</h2>
+        <p>Only inputs travel. Every Client runs the whole Match itself and moves to Tick t only once it has every Player's input for Tick t, relayed by the Server. Inputs are scheduled a few Ticks ahead (input delay) so they have time to arrive. One late input stops everyone.</p>
+      </article>
+    </div>
+  </header>
+
+  <div class="bar" id="bar">
+    <div class="transport">
+      <button type="button" class="btn primary" id="play">Play</button>
+      <button type="button" class="btn" id="step-tick">+1 Tick</button>
+      <button type="button" class="btn" id="step-sec">+1 second</button>
+      <button type="button" class="btn" id="reset">Reset</button>
+    </div>
+    <div class="transport">
+      <label class="clock" for="speed">Speed</label>
+      <select id="speed">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+      <span class="clock" id="clock">Tick 0 · 0.00 s</span>
+    </div>
+    <div class="mirror" id="mirror" hidden>
+      <span id="mirror-label"></span>
+      <button type="button" class="btn primary small" id="mirror-btn"></button>
+    </div>
+  </div>
+
+  <div class="bench">
+    <section class="state" aria-labelledby="state-h">
+      <h2 class="section-h" id="state-h">Current state</h2>
+      <div class="callout" aria-live="polite">
+        <h3 class="section-h">What just happened</h3>
+        <ul id="callout"></ul>
+      </div>
+      <div class="table-wrap"><table class="score" id="score"></table></div>
+      <div class="legend">
+        <span><i class="sw view"></i>What this Client shows</span>
+        <span><i class="sw truth"></i>Where the Server says things are, right now</span>
+        <span><i class="sw lost"></i>Missing: the Client should have it by now</span>
+        <span><i class="sw stuck"></i>Ghost: the Server removed it long ago</span>
+        <span><i class="sw fx"></i>Explosion shown by the Client</span>
+        <span class="note">Counters: <b>wrong</b> means the Client should already have fixed it, <b>late</b> means the fix is still on its way.</span>
+      </div>
+      <div class="worlds" id="worlds"></div>
+      <details class="log" open>
+        <summary>Event log (Server, network, and details for the targeted Client)</summary>
+        <ul id="log"></ul>
+      </details>
+    </section>
+
+    <aside class="side">
+      <section class="panel" aria-labelledby="fp-h">
+        <h2 id="fp-h">Free play</h2>
+        <div class="group">
+          <h3>Approaches</h3>
+          <div class="row2">
+            <label class="field"><span class="lab"><span>Left</span></span><select id="ap-left"></select></label>
+            <label class="field"><span class="lab"><span>Compare with</span></span><select id="ap-right"></select></label>
+            <label class="field"><span class="lab"><span>Players</span></span>
+              <select id="players"><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+            <label class="field"><span class="lab"><span>Seed</span></span><input type="number" id="seed" min="1" max="99999" step="1"></label>
+          </div>
+          <p class="hint">Changing an approach, the Players or the seed restarts the Match.</p>
+        </div>
+
+        <div class="group">
+          <h3>Network, on every link, each direction</h3>
+          <label class="field"><span class="lab"><span>Latency, one way</span><output id="net-latency-out"></output></span><input type="range" id="net-latency" min="0" max="400" step="5"></label>
+          <label class="field"><span class="lab"><span>Jitter (extra 0 to this, order kept)</span><output id="net-jitter-out"></output></span><input type="range" id="net-jitter" min="0" max="100" step="1"></label>
+          <label class="field"><span class="lab"><span>Loss</span><output id="net-loss-out"></output></span><input type="range" id="net-loss" min="0" max="30" step="0.5"></label>
+          <label class="field"><span class="lab"><span>Duplication</span><output id="net-dup-out"></output></span><input type="range" id="net-dup" min="0" max="20" step="0.5"></label>
+          <label class="field"><span class="lab"><span>Reordering (held back 20 to 60 ms)</span><output id="net-reorder-out"></output></span><input type="range" id="net-reorder" min="0" max="20" step="0.5"></label>
+          <label class="field"><span class="lab"><span>Bandwidth cap</span></span>
+            <select id="net-cap">
+              <option value="0">No cap</option>
+              <option value="2000">2 KB/s</option>
+              <option value="5000">5 KB/s (appendix)</option>
+              <option value="10000">10 KB/s</option>
+              <option value="20000">20 KB/s</option>
+              <option value="50000">50 KB/s</option>
+            </select></label>
+          <div class="btns">
+            <button type="button" class="btn small" id="preset-good">Good network</button>
+            <button type="button" class="btn small" id="preset-appendix">Appendix test</button>
+            <button type="button" class="btn small" id="preset-5k">5 KB/s link</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Protocol</h3>
+          <label class="field"><span class="lab"><span>Server sends every K Ticks (A to D)</span><output id="p-k-out"></output></span><input type="range" id="p-k" min="1" max="10" step="1"></label>
+          <label class="field"><span class="lab"><span>Inputs repeated per packet (B, C)</span><output id="p-red-out"></output></span><input type="range" id="p-red" min="1" max="8" step="1"></label>
+          <label class="field"><span class="lab"><span>Timeout before "Player left"</span><output id="p-timeout-out"></output></span><input type="range" id="p-timeout" min="500" max="10000" step="250"></label>
+          <label class="field"><span class="lab"><span>Lockstep input delay (E, restarts)</span><output id="p-delay-out"></output></span><input type="range" id="p-delay" min="1" max="30" step="1"></label>
+          <label class="field"><span class="lab"><span>Enemies per Wave (restarts)</span><output id="p-wave-out"></output></span><input type="range" id="p-wave" min="1" max="8" step="1"></label>
+        </div>
+
+        <div class="group">
+          <h3>Disrupt</h3>
+          <label class="field"><span class="lab"><span>Target Client</span></span><select id="target"></select></label>
+          <div class="btns">
+            <button type="button" class="btn small" id="act-drop">Drop the next packet to Client 2</button>
+            <button type="button" class="btn small" id="act-spike">Latency spike on Client 2 (500 ms for 2 s)</button>
+            <button type="button" class="btn small danger" id="act-crash">Crash Client 2</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <label class="check"><input type="checkbox" id="manual"><span>I play Player 1 (arrow keys and space). Otherwise every Player follows a script.</span></label>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="wt-h">
+        <h2 id="wt-h">Guided walkthroughs</h2>
+        <div class="tabs" role="tablist" id="tabs"></div>
+        <div class="walk" role="tabpanel" id="walk"></div>
+      </section>
+    </aside>
+  </div>
+
+  <section class="assume" aria-labelledby="as-h">
+    <h2 class="section-h" id="as-h">Assumptions behind every number</h2>
+    <div class="assume-grid">
+      <article class="card full">
+        <h3>What the numbers mean</h3>
+        <dl class="defs">
+          <div><dt>Late by</dt><dd>How far behind the Server's current Tick the newest Server state shown by this Client is. For A it is the newest Server Tick the Client has fully caught up with, so in quiet moments, when nothing moves and only heartbeats arrive, it can reach 250 ms plus latency.</dd></div>
+          <div><dt>Position error</dt><dd>Average distance between each entity this Client shows and the same entity on the Server right now. Fast Projectiles dominate it, and it grows with lateness even when nothing is wrong.</dd></div>
+          <div><dt>Missing: wrong · late</dt><dd>Entities the Server has that this Client does not show. Wrong: the entity already existed at the Tick the Client is showing, so it should be there. Late: it appeared after that Tick and is still on its way.</dd></div>
+          <div><dt>Ghosts: wrong · late</dt><dd>Entities this Client shows that the Server has removed. Wrong: removed before the Tick the Client is showing. Late: the removal is still on its way. Counted only while on screen.</dd></div>
+          <div><dt>Own Ship reacts</dt><dd>Time from a key change on this Client to the first screen of that Client showing the Server state that used it, averaged over the last 6 key changes.</dd></div>
+          <div><dt>Down, Up, queue</dt><dd>Bytes sent per second over the last second, headers included, for Server → Client and Client → Server. Queue: how long a packet sent now waits before it can leave, when a bandwidth cap is set.</dd></div>
+          <div><dt>Packets to it</dt><dd>Packets the Server sent to this Client, how many the network lost or duplicated, and how many messages or segments the Server resent.</dd></div>
+          <div><dt>Held back, Waited</dt><dd>Held back (A reliable, D): time during which packets had arrived but could not be used because an earlier one was missing. Waited (E): time this Client could not move to the next Tick.</dd></div>
+          <div><dt>Crash noticed, behind real time</dt><dd>Time from a Client crash until this Client learns that Player left. Behind real time (E): how far the whole Match has fallen behind the clock because everyone waited.</dd></div>
+        </dl>
+      </article>
+      <article class="card">
+        <h3>Byte layout (assumed, not a spec)</h3>
+        <div class="table-wrap" style="border:0"><table class="bytes" id="bytes"></table></div>
+        <p class="live-size" id="live-size"></p>
+      </article>
+      <article class="card">
+        <h3>Network model</h3>
+        <ul>
+          <li>Each Client has two links, Server → Client and Client → Server, each with the same settings. 1 KB = 1000 bytes.</li>
+          <li>Latency is one way. Jitter adds a random 0 to jitter ms per packet but never reorders packets. Reordering is its own setting: that share of packets is held back 20 to 60 ms, so later ones overtake it.</li>
+          <li>Loss and duplication are independent per packet (no bursts). A duplicate arrives just after the original.</li>
+          <li>Bandwidth cap: a packet occupies the link for size ÷ cap. Packets wait in one first-in, first-out queue that never drops, so sending more than the cap turns into ever-growing delay.</li>
+          <li>Byte counts include the IPv4 and UDP (or TCP) headers.</li>
+          <li>Randomness depends only on the seed, the link, the Tick and the packet's position within that Tick, so both sides of a comparison see the same network luck.</li>
+          <li>The Server reads arriving packets once per Tick and each Client once per Frame, both every 16.7 ms here.</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>Protocol details</h3>
+        <ul>
+          <li>Acknowledgements: every packet header carries the latest sequence number received and 32 bits for the 32 before it.</li>
+          <li>A, reliable and C: a message is resent when it has not been confirmed after the measured round trip + 50 ms.</li>
+          <li>D, TCP-like: a lost segment is resent after max(200 ms, 2 × measured round trip). No fast retransmit, no congestion control, no backoff.</li>
+          <li>A: Clients send an input message only when their keys change, plus a heartbeat after 250 ms of silence. Reliable A Clients also send a packet every Frame in which they received something, to acknowledge it. Unreliable A applies messages in arrival order and ignores messages about entities it does not know.</li>
+          <li>A: Projectiles are moved by the Client itself after the "fired" message; Enemies and Ships move only when a "moved" message arrives.</li>
+          <li>E: each packet repeats every input (or input bundle) not yet confirmed, up to 32 Ticks. Nobody runs more than one Tick per 16.7 ms, so time lost to waiting is never caught up.</li>
+          <li>A Player whose Client sends nothing for the timeout is removed and announced to the others.</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>Game model and known simplifications</h3>
+        <ul>
+          <li>640 × 360 playfield, no Star-field drawn. A Wave of Enemies spawns on the right every 4 s (first at 1.5 s) and drifts left. Enemies fire toward the Ship closest in height; Ships fire right. A destroyed Ship comes back after 2 s. The Match never ends, so there is no game over.</li>
+          <li>Players other than you follow a seeded script that changes their keys every 0.5 s.</li>
+          <li>Clients show the latest data they have. No interpolation, extrapolation or prediction: real Clients would smooth (adding delay) or predict their own Ship (hiding delay).</li>
+          <li>Sizes are uncompressed: no delta snapshots, no bit packing beyond the layout shown.</li>
+          <li>"Position error" compares each entity the Client shows with where the Server has it now, so it grows with lateness even when nothing is wrong.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+</div>
+
+<script id="netcode-model">
+/* ============================================================================
+   Netcode model. Pure logic: no DOM, no timers, no globals besides `Netcode`.
+   The page calls into it; nothing flows the other way. Lift this block as-is.
+   ============================================================================ */
+const Netcode = (() => {
+  'use strict';
+
+  /* ---------- Units and constants ---------- */
+  const TICK_HZ = 60;
+  const TICK_MS = 1000 / TICK_HZ;
+  const W = 640, H = 360;
+  const SHIP = 0, ENEMY = 1, SHIP_PROJ = 2, ENEMY_PROJ = 3;
+  const UP = 1, DOWN = 2, LEFT = 4, RIGHT = 8, FIRE = 16;
+  const HEARTBEAT_MS = 250;
+  const RING = 4096;
+
+  const APPROACHES = {
+    'A-u': { letter: 'A', name: 'Event stream, unreliable' },
+    'A-r': { letter: 'A', name: 'Event stream, reliable and ordered' },
+    'B': { letter: 'B', name: 'Snapshots' },
+    'C': { letter: 'C', name: 'Hybrid: snapshots and reliable events' },
+    'D': { letter: 'D', name: 'TCP-like stream' },
+    'E': { letter: 'E', name: 'Lockstep' },
+  };
+
+  /* ---------- Wire format: an assumption, shown on the page ---------- */
+  const WIRE = {
+    ipUdp: 28,          // IPv4 20 + UDP 8
+    ipTcp: 40,          // IPv4 20 + TCP 20
+    header: 16,         // protocol id 2, type 1, flags 1, Tick 4, sequence 2, ack 2, ack bits 4
+    streamHeader: 8,    // TCP-like: protocol id 2, type 1, flags 1, Tick 4 (TCP carries sequence and ack)
+    snapshotPrefix: 2,  // entity count 1, connected-Players bitmask 1
+    entity: 8,          // id 2, kind 1, flags or Player 1, x 2, y 2
+    reliableId: 2,      // per reliable message
+    inputPrefix: 1,     // number of inputs in the packet
+    input: 1,           // up, down, left, right, fire bits
+    ev: { spawn: 8, move: 7, fire: 12, destroy: 3, kill: 8, leave: 3, explosion: 5, input: 2 },
+    bundlePrefix: 1,    // lockstep: number of Ticks in the packet
+    bundleMask: 1,      // lockstep: Players present at this Tick
+    bundleInput: 1,     // lockstep: one input per present Player
+    reliableBudget: 1200,
+  };
+
+  /* ---------- Game tuning ---------- */
+  const G = {
+    shipSpeed: 3, shipCooldown: 12, shipProjSpeed: 9,
+    enemyProjSpeed: 4.5, enemyFireChance: 1 / 110,
+    firstWave: 90, waveEvery: 240,
+    respawnTicks: 120, invulnTicks: 60,
+    rShip: 9, rEnemy: 11, rProj: 3,
+  };
+
+  /* ---------- Seeded randomness: a hash of (seed, purpose, a, b, c) ---------- */
+  const R = { LOSS: 1, JIT: 2, REORD: 3, REORD2: 4, DUP: 5, JIT2: 6, WAVE: 10, EFIRE: 11, SCRIPT: 12 };
+  function rnd(seed, a, b, c, d) {
+    let h = Math.imul((seed | 0) ^ 0x2545f491, 0x9e3779b1);
+    h = Math.imul(h ^ (a | 0), 0x85ebca6b); h ^= h >>> 13;
+    h = Math.imul(h ^ (b | 0), 0xc2b2ae35); h ^= h >>> 16;
+    h = Math.imul(h ^ (c | 0), 0x27d4eb2f); h ^= h >>> 15;
+    h = Math.imul(h ^ (d | 0), 0x165667b1); h ^= h >>> 13;
+    h = Math.imul(h ^ (h >>> 16), 0x85ebca6b); h ^= h >>> 13;
+    h = Math.imul(h ^ (h >>> 16), 0xc2b2ae35); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const q8 = v => Math.round(v * 8) / 8;
+  const near = (a, b, r) => { const dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy < r * r; };
+  const vis = x => x > -8 && x < W + 8;
+  const popcount = m => { let n = 0; while (m) { n += m & 1; m >>>= 1; } return n; };
+  function fmtMs(ms) {
+    if (ms >= 10000) return (ms / 1000).toFixed(0) + ' s';
+    if (ms >= 1000) return (ms / 1000).toFixed(1) + ' s';
+    return Math.round(ms) + ' ms';
+  }
+  function fmtRate(bps) { return bps >= 1000 ? (bps / 1000).toFixed(1) + ' KB/s' : Math.round(bps) + ' B/s'; }
+  function fmtList(items) {
+    if (items.length <= 3) return items.join(', ');
+    return items.slice(0, 3).join(', ') + ` and ${items.length - 3} more`;
+  }
+
+  /* ==========================================================================
+     Game: deterministic. The Server runs it; lockstep Clients run a copy.
+     State label n = the state after n Ticks.
+     ========================================================================== */
+  function newGame(seed, players, perWave) {
+    const g = { seed, players, perWave, tick: 0, nextId: 1, waves: 0, ents: [], present: [], respawnAt: [], cooldown: [] };
+    for (let p = 0; p < 4; p++) { g.present.push(p < players); g.respawnAt.push(0); g.cooldown.push(0); }
+    return g;
+  }
+  function addEnt(g, o) { o.id = g.nextId++; o.born = g.tick + 1; o.dead = false; g.ents.push(o); return o; }
+  function shipOf(g, p) { for (const e of g.ents) if (e.kind === SHIP && e.player === p && !e.dead) return e; return null; }
+
+  // inputs[p-1] = { bits, fire } or null; leaves = Players removed at this Tick; out receives events.
+  function stepGame(g, inputs, leaves, out) {
+    const T = g.tick, L = T + 1;
+    for (const p of leaves) {
+      if (!g.present[p - 1]) continue;
+      g.present[p - 1] = false;
+      const s = shipOf(g, p);
+      if (s) s.dead = true;
+      out.push({ t: 'leave', player: p, id: s ? s.id : 0, tick: L });
+    }
+    for (let p = 1; p <= g.players; p++) {
+      if (!g.present[p - 1] || shipOf(g, p) || T < g.respawnAt[p - 1]) continue;
+      const s = addEnt(g, { kind: SHIP, player: p, x: 60, y: Math.round(H * p / (g.players + 1)), vx: 0, vy: 0, inv: T > 0 ? T + G.invulnTicks : 0 });
+      out.push({ t: 'spawn', id: s.id, kind: SHIP, player: p, x: s.x, y: s.y, tick: L });
+    }
+    for (const s of g.ents) {
+      if (s.kind !== SHIP || s.dead || s.born > T) continue;
+      const inp = inputs[s.player - 1];
+      const b = inp ? inp.bits : 0;
+      const dx = (b & RIGHT ? 1 : 0) - (b & LEFT ? 1 : 0);
+      const dy = (b & DOWN ? 1 : 0) - (b & UP ? 1 : 0);
+      s.x = clamp(s.x + dx * G.shipSpeed, 16, 320);
+      s.y = clamp(s.y + dy * G.shipSpeed, 16, H - 16);
+      const i = s.player - 1;
+      if (g.cooldown[i] > 0) g.cooldown[i]--;
+      if (((b & FIRE) || (inp && inp.fire)) && g.cooldown[i] === 0) {
+        g.cooldown[i] = G.shipCooldown;
+        const pr = addEnt(g, { kind: SHIP_PROJ, x: s.x + 14, y: s.y, vx: G.shipProjSpeed, vy: 0, owner: s.id });
+        out.push({ t: 'fire', id: pr.id, kind: SHIP_PROJ, x: pr.x, y: pr.y, vx: pr.vx, vy: 0, owner: s.id, player: s.player, tick: L });
+      }
+    }
+    if (T >= G.firstWave && (T - G.firstWave) % G.waveEvery === 0) {
+      const wave = ++g.waves, n = g.perWave;
+      for (let i = 0; i < n; i++) {
+        const r = k => rnd(g.seed, R.WAVE, wave, i, k);
+        const y = Math.round(44 + (H - 88) * (i + 0.5) / n + (r(1) - 0.5) * 16);
+        const e = addEnt(g, { kind: ENEMY, x: 626 - (i % 2) * 16, y, baseY: y, amp: 10 + 24 * r(2), freq: 0.02 + 0.03 * r(3), phase: 6.2832 * r(4), vx: -q8(1.1 + 0.6 * r(5)), vy: 0, wave });
+        out.push({ t: 'spawn', id: e.id, kind: ENEMY, x: e.x, y: e.y, wave, tick: L });
+      }
+    }
+    for (const e of g.ents) {
+      if (e.kind !== ENEMY || e.dead || e.born > T) continue;
+      e.x += e.vx;
+      e.y = e.baseY + e.amp * (Math.sin((L - e.born) * e.freq + e.phase) - Math.sin(e.phase));
+      if (e.x < -30) { e.dead = true; out.push({ t: 'gone', id: e.id, tick: L }); continue; }
+      if (e.x > 120 && e.x < 600 && rnd(g.seed, R.EFIRE, e.id, T, 0) < G.enemyFireChance) {
+        let tgt = null, best = Infinity;
+        for (const s of g.ents) if (s.kind === SHIP && !s.dead) { const d = Math.abs(s.y - e.y); if (d < best) { best = d; tgt = s; } }
+        const vy = tgt ? clamp((tgt.y - e.y) / Math.max(40, e.x - tgt.x) * G.enemyProjSpeed, -1.5, 1.5) : 0;
+        const pr = addEnt(g, { kind: ENEMY_PROJ, x: Math.round(e.x - 12), y: Math.round(e.y), vx: -G.enemyProjSpeed, vy: q8(vy), owner: e.id });
+        out.push({ t: 'fire', id: pr.id, kind: ENEMY_PROJ, x: pr.x, y: pr.y, vx: pr.vx, vy: pr.vy, owner: e.id, tick: L });
+      }
+    }
+    for (const p of g.ents) {
+      if ((p.kind !== SHIP_PROJ && p.kind !== ENEMY_PROJ) || p.dead || p.born > T) continue;
+      p.x += p.vx; p.y += p.vy;
+      if (p.x > W + 20 || p.x < -20 || p.y < -20 || p.y > H + 20) { p.dead = true; out.push({ t: 'gone', id: p.id, tick: L }); }
+    }
+    for (const p of g.ents) {
+      if (p.kind !== SHIP_PROJ || p.dead) continue;
+      for (const e of g.ents) {
+        if (e.kind !== ENEMY || e.dead || !near(p, e, G.rEnemy + G.rProj)) continue;
+        p.dead = e.dead = true;
+        out.push({ t: 'destroy', id: e.id, kind: ENEMY, x: Math.round(e.x), y: Math.round(e.y), tick: L });
+        out.push({ t: 'destroy', id: p.id, kind: SHIP_PROJ, x: Math.round(p.x), y: Math.round(p.y), tick: L });
+        break;
+      }
+    }
+    for (const s of g.ents) {
+      if (s.kind !== SHIP || s.dead || T < s.inv) continue;
+      let o = null;
+      for (const p of g.ents) if (p.kind === ENEMY_PROJ && !p.dead && near(p, s, G.rShip + G.rProj)) { o = p; break; }
+      if (!o) for (const e of g.ents) if (e.kind === ENEMY && !e.dead && near(e, s, G.rShip + G.rEnemy)) { o = e; break; }
+      if (!o) continue;
+      s.dead = o.dead = true;
+      g.respawnAt[s.player - 1] = L + G.respawnTicks;
+      out.push({ t: 'destroy', id: o.id, kind: o.kind, x: Math.round(o.x), y: Math.round(o.y), tick: L });
+      out.push({ t: 'kill', id: s.id, player: s.player, x: s.x, y: s.y, tick: L });
+    }
+    g.ents = g.ents.filter(e => !e.dead);
+    g.tick = L;
+  }
+
+  function scriptedBits(seed, player, t) {
+    const chunk = Math.floor((t + player * 11) / 30);
+    const a = rnd(seed, R.SCRIPT, player, chunk, 1), b = rnd(seed, R.SCRIPT, player, chunk, 2), c = rnd(seed, R.SCRIPT, player, chunk, 3);
+    let bits = 0;
+    if (a < 0.34) bits |= UP; else if (a < 0.68) bits |= DOWN;
+    if (b < 0.12) bits |= LEFT; else if (b < 0.3) bits |= RIGHT;
+    if (c < 0.72) bits |= FIRE;
+    return bits;
+  }
+  const inputFor = (w, player, t) => (w.manual && player === 1 ? w.manualBits : scriptedBits(w.seed, player, t));
+
+  /* ==========================================================================
+     Network: one link per direction per Client.
+     ========================================================================== */
+  function makeLink(id, name) {
+    return {
+      id, name, fly: [], busyUntil: 0, lastArr: 0, kStep: -1, k: 0, ord: 0,
+      dropNext: 0, dropTag: null, spikeFrom: -1, spikeUntil: -1, spikeExtra: 0,
+      sent: 0, lost: 0, dup: 0, bytes: 0, lastSize: 0,
+      ring: new Float64Array(60), ringStep: new Int32Array(60).fill(-1), qMark: 0,
+    };
+  }
+  function rate(l, step) {
+    let s = 0;
+    for (let k = 0; k < 60; k++) if (l.ringStep[k] > step - 60) s += l.ring[k];
+    return s;
+  }
+  function transmit(w, l, pkt) {
+    const net = w.net, now = w.now, t = w.step;
+    if (l.kStep !== t) { l.kStep = t; l.k = 0; }
+    const k = l.k++;
+    l.sent++; l.bytes += pkt.size; l.lastSize = pkt.size;
+    const slot = t % 60;
+    if (l.ringStep[slot] !== t) { l.ringStep[slot] = t; l.ring[slot] = 0; }
+    l.ring[slot] += pkt.size;
+    let txEnd = now;
+    if (net.cap > 0) { const start = Math.max(now, l.busyUntil); txEnd = start + pkt.size * 1000 / net.cap; l.busyUntil = txEnd; }
+    let why = null;
+    if (l.dropNext > 0) { l.dropNext--; why = 'forced'; }
+    else if (l.dropTag && pkt.tags && pkt.tags.indexOf(l.dropTag) >= 0) { l.dropTag = null; why = 'forced'; }
+    else if (net.loss > 0 && rnd(w.seed, R.LOSS, l.id, t, k) < net.loss) why = 'random';
+    if (why) { l.lost++; onLost(w, l, pkt, why); return; }
+    const spike = now >= l.spikeFrom && now < l.spikeUntil ? l.spikeExtra : 0;
+    let arr = txEnd + net.latency + spike + net.jitter * rnd(w.seed, R.JIT, l.id, t, k);
+    if (net.reorder > 0 && rnd(w.seed, R.REORD, l.id, t, k) < net.reorder) {
+      arr += 20 + 40 * rnd(w.seed, R.REORD2, l.id, t, k);
+    } else {
+      if (arr < l.lastArr) arr = l.lastArr;
+      l.lastArr = arr;
+    }
+    l.fly.push({ arr, ord: l.ord++, pkt });
+    if (net.dup > 0 && rnd(w.seed, R.DUP, l.id, t, k) < net.dup) {
+      l.dup++;
+      l.fly.push({ arr: arr + 1 + net.jitter * rnd(w.seed, R.JIT2, l.id, t, k), ord: l.ord++, pkt, dup: true });
+    }
+  }
+  const NONE = [];
+  function due(l, now) {
+    if (!l.fly.length) return NONE;
+    let out = null;
+    const keep = [];
+    for (const f of l.fly) { if (f.arr <= now + 1e-6) (out || (out = [])).push(f); else keep.push(f); }
+    if (!out) return NONE;
+    l.fly = keep;
+    out.sort((a, b) => a.arr - b.arr || a.ord - b.ord);
+    return out;
+  }
+
+  /* ---------- Acknowledgements: latest sequence + 32 bits ---------- */
+  function ackTracker() { return { max: -1, got: new Set() }; }
+  function noteSeq(a, s) {
+    a.got.add(s);
+    if (s > a.max) a.max = s;
+    if (a.got.size > 96) for (const x of a.got) if (x < a.max - 40) a.got.delete(x);
+  }
+  function ackOf(a) {
+    let bits = 0;
+    for (let i = 1; i <= 32; i++) if (a.got.has(a.max - i)) bits |= 1 << (i - 1);
+    return { ack: a.max, ackBits: bits >>> 0 };
+  }
+  function forAcked(ack, bits, fn) {
+    if (ack == null || ack < 0) return;
+    fn(ack);
+    for (let i = 1; i <= 32; i++) if ((bits >>> (i - 1)) & 1) fn(ack - i);
+  }
+
+  /* ---------- Reliable messages over UDP (A reliable, C) ---------- */
+  function relSender() { return { next: 0, q: [], sent: new Map(), srtt: 200, resent: 0 }; }
+  function relPush(r, ev, tick, size) { r.q.push({ id: r.next++, ev, tick, size: size + WIRE.reliableId, at: -Infinity, n: 0, acked: false }); }
+  function relPick(r, now) {
+    const rto = r.srtt + 50, out = [];
+    let used = 0;
+    for (const m of r.q) {
+      if (m.acked || (m.n > 0 && now - m.at < rto)) continue;
+      if (used + m.size > WIRE.reliableBudget) break;
+      used += m.size; out.push(m);
+    }
+    for (const m of out) { if (m.n > 0) r.resent++; m.n++; m.at = now; }
+    return out;
+  }
+  function relSent(r, seq, msgs, now) { if (msgs.length) r.sent.set(seq, { at: now, msgs }); }
+  function relAck(r, ack, bits, now) {
+    forAcked(ack, bits, s => {
+      const p = r.sent.get(s);
+      if (!p) return;
+      r.sent.delete(s);
+      r.srtt = 0.875 * r.srtt + 0.125 * (now - p.at);
+      for (const m of p.msgs) m.acked = true;
+    });
+    let k = 0;
+    while (k < r.q.length && r.q[k].acked) k++;
+    if (k) r.q.splice(0, k);
+    if (r.sent.size > 300) for (const [s, p] of r.sent) if (now - p.at > 5000) r.sent.delete(s);
+  }
+  function relReceiver() { return { expect: 0, buf: new Map(), dups: 0 }; }
+  function relTake(r, msgs, apply) {
+    for (const m of msgs) {
+      if (m.id < r.expect || r.buf.has(m.id)) { r.dups++; continue; }
+      r.buf.set(m.id, m);
+    }
+    while (r.buf.has(r.expect)) { const m = r.buf.get(r.expect); r.buf.delete(r.expect); r.expect++; apply(m); }
+  }
+
+  /* ---------- Reliable ordered stream (D, TCP-like) ---------- */
+  function streamSender() { return { next: 0, un: new Map(), srtt: 200, rtx: 0 }; }
+  function streamSend(w, link, tx, pkt) {
+    pkt.seg = tx.next++;
+    tx.un.set(pkt.seg, { pkt, at: w.now, rtx: false });
+    transmit(w, link, pkt);
+  }
+  function streamAcked(w, tx, cum, ack, bits) {
+    const done = seg => {
+      const u = tx.un.get(seg);
+      if (!u) return;
+      if (!u.rtx) tx.srtt = 0.875 * tx.srtt + 0.125 * (w.now - u.at);
+      tx.un.delete(seg);
+    };
+    for (const seg of Array.from(tx.un.keys())) if (seg <= cum) done(seg);
+    forAcked(ack, bits, done);
+  }
+  function streamRetransmit(w, link, tx, fields) {
+    const rto = Math.max(200, 2 * tx.srtt);
+    for (const u of tx.un.values()) {
+      if (w.now - u.at < rto) continue;
+      const p = Object.assign({}, u.pkt, fields(), { rtx: true });
+      u.at = w.now; u.rtx = true; tx.rtx++;
+      transmit(w, link, p);
+    }
+  }
+  function streamReceiver() { return { expect: 0, buf: new Map(), got: ackTracker(), dups: 0 }; }
+  function streamReceive(rx, pkt, deliver) {
+    noteSeq(rx.got, pkt.seg);
+    if (pkt.seg < rx.expect || rx.buf.has(pkt.seg)) { rx.dups++; return; }
+    rx.buf.set(pkt.seg, pkt);
+    while (rx.buf.has(rx.expect)) { const p = rx.buf.get(rx.expect); rx.buf.delete(rx.expect); rx.expect++; deliver(p); }
+  }
+  function streamFields(rx) { const a = ackOf(rx.got); return { cum: rx.expect - 1, ack: a.ack, ackBits: a.ackBits }; }
+
+  /* ==========================================================================
+     World = one Server, its Clients and their links, for one approach.
+     ========================================================================== */
+  function createWorld(o) {
+    const w = {
+      approach: o.approach,
+      seed: (o.seed >>> 0) || 1,
+      players: o.players,
+      net: Object.assign({ latency: 60, jitter: 10, loss: 0, dup: 0, reorder: 0, cap: 0 }, o.net),
+      K: o.K || 1,
+      redundancy: o.redundancy || 3,
+      inputDelay: o.inputDelay || 10,
+      timeoutMs: o.timeoutMs || 3000,
+      perWave: o.enemiesPerWave || 5,
+      target: Math.min(o.target || 2, o.players),
+      step: 0, now: 0,
+      manual: false, manualBits: 0,
+      log: [], logSeq: 0,
+      crashAt: [null, null, null, null],
+      down: [], up: [], clients: [],
+    };
+    w.server = makeServer(w);
+    for (let i = 0; i < w.players; i++) {
+      w.down.push(makeLink(i * 2, `Server → Client ${i + 1}`));
+      w.up.push(makeLink(i * 2 + 1, `Client ${i + 1} → Server`));
+      w.clients.push(makeClient(w, i));
+    }
+    return w;
+  }
+  function makeServer(w) {
+    const S = {
+      g: newGame(w.seed, w.players, w.perWave),
+      P: [], chan: [], life: new Map(), byId: new Map(),
+      applied: new Int32Array(RING * 4).fill(-1),
+      pendingLeaves: [], snapCache: null, ls: null,
+    };
+    for (let i = 0; i < w.players; i++) {
+      S.P.push({ player: i + 1, connected: true, lastHeard: 0, bits: 0, seq: -1, fire: false, lostInputs: 0, relRx: relReceiver(), srx: streamReceiver() });
+      S.chan.push({ seq: 0, rx: ackTracker(), rel: relSender(), pend: [], shipPos: new Map(), tx: streamSender(), lastSend: -1e9 });
+    }
+    if (w.approach === 'E') {
+      S.ls = {
+        inputs: S.P.map(() => new Map()), need: S.P.map(() => w.inputDelay), acked: S.P.map(() => -1),
+        bundles: new Map(), lastSend: S.P.map(() => -1e9), waiting: false, waitStart: 0, waitingFor: [], waitTick: 0,
+      };
+    }
+    return S;
+  }
+  function makeClient(w, i) {
+    const c = {
+      i, player: i + 1, crashed: false, kicked: false,
+      view: new Map(), viewTick: 0, maxPktTick: 0, lastSnap: -1, mask: (1 << w.players) - 1,
+      seq: 0, rx: ackTracker(), rel: relSender(), relRx: relReceiver(), tx: streamSender(), srx: streamReceiver(),
+      hist: [], lastBits: -1, lastSentBits: -1, lastSend: -1e9,
+      pend: [], reacts: [],
+      fx: [], notes: [], gone: new Set(), unknown: new Set(), heardLeft: new Set(),
+      holding: false, holdStart: 0, holdPeak: 0, holdId: 0,
+      flags: new Map(), missing: [],
+      m: { age: 0, posErr: 0, missLost: 0, missLate: 0, ghostStuck: 0, ghostLate: 0, react: null, reactWait: 0, holdMs: 0, holdCount: 0, stallMs: 0, discarded: 0, crashNoticed: null },
+      ls: null,
+    };
+    if (w.approach === 'E') c.ls = { g: newGame(w.seed, w.players, w.perWave), bundles: new Map(), mine: new Map(), ackedIn: w.inputDelay - 1, lastBits: -1, waiting: false };
+    return c;
+  }
+
+  function log(w, who, text, level) {
+    w.log.push({ n: ++w.logSeq, step: w.step, who, text, level: level || 'info' });
+    if (w.log.length > 400) w.log.shift();
+  }
+  const isTarget = (w, c) => c.i + 1 === w.target;
+  function boom(c, x, y, now) { c.fx.push({ x, y, t: now }); }
+  function note(c, text, now) { c.notes.push({ text, t: now }); if (c.notes.length > 3) c.notes.shift(); }
+  function addReact(c, ms) { c.reacts.push(ms); if (c.reacts.length > 6) c.reacts.shift(); c.m.react = c.reacts.reduce((a, b) => a + b, 0) / c.reacts.length; }
+  function kindName(w, id) { const L = w.server.life.get(id); return L ? ['Ship', 'Enemy', 'Projectile', 'Projectile'][L.kind] : 'entity'; }
+
+  function importantOf(evs) {
+    const out = [];
+    const wave = evs.filter(e => e.t === 'spawn' && e.kind === ENEMY);
+    if (wave.length) out.push(`Wave ${wave[0].wave} spawned (Enemies ${wave[0].id} to ${wave[wave.length - 1].id})`);
+    let fired = 0, projGone = 0;
+    for (const e of evs) {
+      if (e.t === 'spawn' && e.kind === SHIP) out.push(`Ship of Player ${e.player} appeared`);
+      else if (e.t === 'fire') fired++;
+      else if (e.t === 'destroy' && e.kind === ENEMY) out.push(`Enemy ${e.id} destroyed`);
+      else if (e.t === 'destroy') projGone++;
+      else if (e.t === 'kill') out.push(`Ship of Player ${e.player} destroyed`);
+      else if (e.t === 'leave') out.push(`Player ${e.player} left`);
+    }
+    if (fired) out.push(`${fired} Projectile${fired > 1 ? 's' : ''} fired`);
+    if (projGone) out.push(`${projGone} Projectile${projGone > 1 ? 's' : ''} destroyed`);
+    return out;
+  }
+  function describe(p) {
+    switch (p.kind) {
+      case 'ev': { const imp = importantOf(p.events); return `the events of Tick ${p.tick}` + (imp.length ? ` (${fmtList(imp)})` : ''); }
+      case 'ar': return `packet ${p.seq} (${p.msgs.length} reliable messages)`;
+      case 'snap': return `the snapshot of Tick ${p.tick}` + (p.msgs && p.msgs.length ? ` and ${p.msgs.length} reliable event${p.msgs.length > 1 ? 's' : ''}` : '');
+      case 'seg': return `stream segment ${p.seg} (snapshot of Tick ${p.tick})`;
+      case 'ls-b':
+        if (!p.bundles.length) return 'a heartbeat';
+        if (p.bundles.length === 1) return `the inputs for Tick ${p.bundles[0].tick}`;
+        return `the inputs for Ticks ${p.bundles[0].tick} to ${p.bundles[p.bundles.length - 1].tick}`;
+      default: return 'a packet';
+    }
+  }
+  function onLost(w, l, pkt, why) {
+    const down = l.id % 2 === 0, i = l.id >> 1;
+    if (why === 'forced') {
+      log(w, 'Network', `Lost on purpose on its way to Client ${i + 1}: ${describe(pkt)}.`, 'bad');
+      return;
+    }
+    if (w.approach !== 'A-u' || i + 1 !== w.target) return;
+    if (down) {
+      const imp = importantOf(pkt.events);
+      if (imp.length) log(w, 'Network', `Lost on its way to Client ${i + 1}: ${fmtList(imp)}. Nobody will resend it.`, 'bad');
+    } else if (pkt.events.length) {
+      log(w, 'Network', `Lost on its way to the Server: Player ${i + 1}'s key change. The Server keeps applying the old keys.`, 'bad');
+    }
+  }
+
+  /* ---------- Server bookkeeping ---------- */
+  function afterServerStep(w, events) {
+    const S = w.server, t = S.g.tick;
+    let spawned = 0, wave = 0;
+    for (const ev of events) {
+      if (ev.t === 'spawn' || ev.t === 'fire') S.life.set(ev.id, { kind: ev.kind, spawn: t, death: Infinity });
+      else if (ev.id && (ev.t === 'destroy' || ev.t === 'kill' || ev.t === 'gone' || ev.t === 'leave')) {
+        const L = S.life.get(ev.id);
+        if (L) L.death = t;
+      }
+      if (ev.t === 'spawn' && ev.kind === ENEMY) { spawned++; wave = ev.wave; }
+      if (ev.t === 'kill') log(w, 'Server', `The Ship of Player ${ev.player} was destroyed.`, 'info');
+    }
+    if (spawned) log(w, 'Server', `Wave ${wave} spawned: ${spawned} Enem${spawned > 1 ? 'ies' : 'y'} on the right.`, 'info');
+    S.byId = new Map();
+    for (const e of S.g.ents) S.byId.set(e.id, e);
+    if (w.approach !== 'E') for (const P of S.P) S.applied[(t % RING) * 4 + P.player - 1] = P.seq;
+    if (t % 600 === 0) for (const [id, L] of S.life) if (L.death < t - 1800) S.life.delete(id);
+  }
+  function timeOut(w, P) {
+    P.connected = false;
+    w.server.pendingLeaves.push(P.player);
+    const c = w.clients[P.player - 1];
+    if (!c.crashed) c.kicked = true;
+    log(w, 'Server', `No packet from Client ${P.player} for ${fmtMs(w.timeoutMs)}: Player ${P.player} timed out. The Server removes the Ship and tells the other Clients.` +
+      (c.crashed ? '' : ` Client ${P.player} was only late, not crashed.`), c.crashed ? 'info' : 'bad');
+  }
+
+  /* ---------- Server Tick for A to D ---------- */
+  function serverTick(w) {
+    const S = w.server, now = w.now;
+    for (let i = 0; i < w.players; i++) {
+      for (const f of due(w.up[i], now)) {
+        const P = S.P[i];
+        if (!P.connected) continue;
+        P.lastHeard = now;
+        serverReceive(w, i, f.pkt);
+      }
+    }
+    for (const P of S.P) if (P.connected && now - P.lastHeard > w.timeoutMs) timeOut(w, P);
+    const inputs = S.P.map(P => (P.connected ? { bits: P.bits, fire: P.fire } : null));
+    const leaves = S.pendingLeaves;
+    S.pendingLeaves = [];
+    const events = [];
+    stepGame(S.g, inputs, leaves, events);
+    for (const P of S.P) P.fire = false;
+    afterServerStep(w, events);
+    replicate(w, events);
+    if (S.g.tick % w.K === 0) for (let i = 0; i < w.players; i++) if (S.P[i].connected) serverSend(w, i);
+    if (w.approach === 'D') {
+      for (let i = 0; i < w.players; i++) if (S.P[i].connected) streamRetransmit(w, w.down[i], S.chan[i].tx, () => streamFields(S.P[i].srx));
+    }
+  }
+  function serverReceive(w, i, pkt) {
+    const S = w.server, P = S.P[i], ch = S.chan[i], ap = w.approach;
+    if (ap === 'A-u') {
+      for (const ev of pkt.events) if (ev.t === 'input') { P.bits = ev.bits; P.seq = ev.seq; if (ev.bits & FIRE) P.fire = true; }
+    } else if (ap === 'A-r') {
+      noteSeq(ch.rx, pkt.seq);
+      relAck(ch.rel, pkt.ack, pkt.ackBits, w.now);
+      relTake(P.relRx, pkt.msgs, m => { P.bits = m.ev.bits; P.seq = m.ev.seq; if (m.ev.bits & FIRE) P.fire = true; });
+    } else if (ap === 'B' || ap === 'C') {
+      noteSeq(ch.rx, pkt.seq);
+      if (ap === 'C') relAck(ch.rel, pkt.ack, pkt.ackBits, w.now);
+      if (pkt.last <= P.seq) return;
+      const first = pkt.last - pkt.bits.length + 1;
+      if (P.seq >= 0 && first > P.seq + 1) P.lostInputs += first - (P.seq + 1);
+      for (let k = 0; k < pkt.bits.length; k++) if (first + k > P.seq && (pkt.bits[k] & FIRE)) P.fire = true;
+      P.bits = pkt.bits[pkt.bits.length - 1];
+      P.seq = pkt.last;
+    } else if (ap === 'D') {
+      streamAcked(w, ch.tx, pkt.cum, pkt.ack, pkt.ackBits);
+      streamReceive(P.srx, pkt, p => { P.bits = p.bits; P.seq = p.seqIn; if (p.bits & FIRE) P.fire = true; });
+    }
+  }
+  function replicate(w, events) {
+    const S = w.server, ap = w.approach, tick = S.g.tick;
+    const evs = events.filter(e => e.t !== 'gone');
+    if (!evs.length || ap === 'B') return;
+    for (let i = 0; i < w.players; i++) {
+      if (!S.P[i].connected) continue;
+      const ch = S.chan[i];
+      if (ap === 'A-u') { for (const e of evs) ch.pend.push(e); continue; }
+      if (ap === 'A-r') { for (const e of evs) relPush(ch.rel, e, tick, WIRE.ev[e.t]); continue; }
+      for (const e of evs) {
+        let pe = null;
+        if (e.t === 'destroy' && e.kind === ENEMY) pe = { t: 'explosion', x: e.x, y: e.y, tick };
+        else if (e.t === 'kill') pe = { t: 'kill', id: e.id, player: e.player, x: e.x, y: e.y, tick };
+        else if (e.t === 'leave') pe = { t: 'leave', player: e.player, id: e.id, tick };
+        if (!pe) continue;
+        if (ap === 'C') relPush(ch.rel, pe, tick, WIRE.ev[pe.t]); else ch.pend.push(pe);
+      }
+    }
+  }
+  function movesFor(S, ch) {
+    const out = [], t = S.g.tick;
+    for (const e of S.g.ents) {
+      if (e.born >= t) continue;
+      if (e.kind === ENEMY) out.push({ t: 'move', id: e.id, x: Math.round(e.x), y: Math.round(e.y), tick: t });
+      else if (e.kind === SHIP) {
+        const last = ch.shipPos.get(e.id);
+        if (!last || last.x !== e.x || last.y !== e.y) { out.push({ t: 'move', id: e.id, x: e.x, y: e.y, tick: t }); ch.shipPos.set(e.id, { x: e.x, y: e.y }); }
+      }
+    }
+    return out;
+  }
+  function snapshotOf(S) {
+    if (S.snapCache && S.snapCache.tick === S.g.tick) return S.snapCache;
+    const ents = S.g.ents.map(e => ({ id: e.id, kind: e.kind, player: e.player || 0, x: Math.round(e.x), y: Math.round(e.y) }));
+    let mask = 0;
+    S.P.forEach((P, i) => { if (P.connected) mask |= 1 << i; });
+    S.snapCache = { tick: S.g.tick, ents, mask };
+    return S.snapCache;
+  }
+  const evSize = list => list.reduce((s, e) => s + WIRE.ev[e.t], 0);
+  const msgSize = list => list.reduce((s, m) => s + m.size, 0);
+  function tagsOf(evs) {
+    const tags = [];
+    if (evs.some(e => e.t === 'spawn' && e.kind === ENEMY)) tags.push('wave');
+    if (evs.some(e => e.t === 'leave')) tags.push('leave');
+    return tags;
+  }
+  function serverSend(w, i) {
+    const S = w.server, ch = S.chan[i], ap = w.approach, now = w.now, tick = S.g.tick, link = w.down[i];
+    if (ap === 'A-u') {
+      const all = ch.pend.concat(movesFor(S, ch));
+      ch.pend = [];
+      if (!all.length && now - ch.lastSend < HEARTBEAT_MS) return;
+      transmit(w, link, { kind: 'ev', tick, events: all, tags: tagsOf(all), size: WIRE.ipUdp + WIRE.header + evSize(all) });
+    } else if (ap === 'A-r') {
+      for (const mv of movesFor(S, ch)) relPush(ch.rel, mv, tick, WIRE.ev.move);
+      const msgs = relPick(ch.rel, now);
+      if (!msgs.length && now - ch.lastSend < HEARTBEAT_MS) return;
+      const seq = ch.seq++, a = ackOf(ch.rx);
+      transmit(w, link, { kind: 'ar', seq, tick, ack: a.ack, ackBits: a.ackBits, msgs, tags: tagsOf(msgs.map(m => m.ev)), size: WIRE.ipUdp + WIRE.header + msgSize(msgs) });
+      relSent(ch.rel, seq, msgs, now);
+    } else if (ap === 'B' || ap === 'C') {
+      const snap = snapshotOf(S);
+      const msgs = ap === 'C' ? relPick(ch.rel, now) : [];
+      const seq = ch.seq++, a = ackOf(ch.rx);
+      transmit(w, link, {
+        kind: 'snap', seq, tick, ents: snap.ents, mask: snap.mask, msgs, ack: a.ack, ackBits: a.ackBits,
+        tags: tagsOf(msgs.map(m => m.ev)),
+        size: WIRE.ipUdp + WIRE.header + WIRE.snapshotPrefix + WIRE.entity * snap.ents.length + msgSize(msgs),
+      });
+      if (msgs.length) relSent(ch.rel, seq, msgs, now);
+    } else if (ap === 'D') {
+      const snap = snapshotOf(S);
+      const evs = ch.pend;
+      ch.pend = [];
+      streamSend(w, link, ch.tx, Object.assign({
+        kind: 'seg', tick, ents: snap.ents, mask: snap.mask, events: evs, tags: tagsOf(evs),
+        size: WIRE.ipTcp + WIRE.streamHeader + WIRE.snapshotPrefix + WIRE.entity * snap.ents.length + evSize(evs),
+      }, streamFields(S.P[i].srx)));
+    }
+    ch.lastSend = now;
+  }
+
+  /* ---------- Client Tick for A to D ---------- */
+  function clientTick(w, c) {
+    const now = w.now, ap = w.approach;
+    let got = false;
+    if (ap === 'A-u' || ap === 'A-r') moveLocalProjectiles(c);
+    for (const f of due(w.down[c.i], now)) { got = true; clientReceive(w, c, f.pkt); }
+    const bits = inputFor(w, c.player, w.step);
+    if (bits !== c.lastBits) { c.pend.push({ seq: w.step, time: now }); if (c.pend.length > 50) c.pend.shift(); c.lastBits = bits; }
+    c.hist.push(bits);
+    if (c.hist.length > 8) c.hist.shift();
+    clientSend(w, c, bits, got);
+    holdWatch(w, c);
+  }
+  function clientReceive(w, c, pkt) {
+    const ap = w.approach;
+    if (ap === 'A-u') {
+      if (pkt.tick > c.viewTick) c.viewTick = pkt.tick;
+      if (pkt.tick > c.maxPktTick) c.maxPktTick = pkt.tick;
+      for (const ev of pkt.events) applyEventA(w, c, ev);
+    } else if (ap === 'A-r') {
+      noteSeq(c.rx, pkt.seq);
+      relAck(c.rel, pkt.ack, pkt.ackBits, w.now);
+      if (pkt.tick > c.maxPktTick) c.maxPktTick = pkt.tick;
+      let last = -1;
+      relTake(c.relRx, pkt.msgs, m => { applyEventA(w, c, m.ev); if (m.tick > last) last = m.tick; });
+      if (c.relRx.buf.size === 0) c.viewTick = Math.max(c.viewTick, c.maxPktTick);
+      else if (last > c.viewTick) c.viewTick = last;
+    } else if (ap === 'B' || ap === 'C') {
+      noteSeq(c.rx, pkt.seq);
+      if (pkt.tick > c.lastSnap) applySnapshot(w, c, pkt); else c.m.discarded++;
+      if (ap === 'C' && pkt.msgs.length) relTake(c.relRx, pkt.msgs, m => applyPresentation(w, c, m.ev));
+    } else if (ap === 'D') {
+      streamAcked(w, c.tx, pkt.cum, pkt.ack, pkt.ackBits);
+      streamReceive(c.srx, pkt, p => {
+        if (p.tick > c.lastSnap) applySnapshot(w, c, p);
+        for (const ev of p.events) applyPresentation(w, c, ev);
+      });
+    }
+  }
+  function applySnapshot(w, c, pkt) {
+    const view = new Map();
+    for (const e of pkt.ents) view.set(e.id, e);
+    c.view = view;
+    c.lastSnap = pkt.tick;
+    c.viewTick = pkt.tick;
+    if (pkt.mask !== c.mask) {
+      if (w.approach === 'B') {
+        for (let p = 1; p <= w.players; p++) {
+          const bit = 1 << (p - 1);
+          if ((c.mask & bit) && !(pkt.mask & bit)) heardLeave(w, c, p, 'its Ship vanished from the snapshots');
+        }
+      }
+      c.mask = pkt.mask;
+    }
+  }
+  function applyPresentation(w, c, ev) {
+    const late = w.now - ev.tick * TICK_MS;
+    if (ev.t === 'explosion') boom(c, ev.x, ev.y, w.now);
+    else if (ev.t === 'kill') { boom(c, ev.x, ev.y, w.now); note(c, `Player ${ev.player}'s Ship was destroyed`, w.now); }
+    else if (ev.t === 'leave') heardLeave(w, c, ev.player, 'announcement');
+    if (w.approach === 'C' && isTarget(w, c) && ev.t !== 'leave' && late > w.net.latency + w.net.jitter + 120) {
+      log(w, `Client ${c.i + 1}`, `Shows ${ev.t === 'kill' ? `"Ship of Player ${ev.player} destroyed"` : 'an explosion'} ${fmtMs(late)} after it happened: its first copy was lost and resent. The screen state never waited for it.`, 'info');
+    }
+  }
+  // A Client's picture of the Match is built from messages only. Projectiles are moved locally
+  // after "fired", placed where they should be at the newest Server Tick this Client has heard of.
+  function applyEventA(w, c, ev) {
+    const v = c.view;
+    switch (ev.t) {
+      case 'spawn':
+        if (!v.has(ev.id) && !c.gone.has(ev.id)) v.set(ev.id, { id: ev.id, kind: ev.kind, player: ev.player || 0, x: ev.x, y: ev.y });
+        break;
+      case 'move': {
+        const e = v.get(ev.id);
+        if (e) {
+          e.x = ev.x; e.y = ev.y;
+          if (e.kind === ENEMY && e.x < -8) { v.delete(ev.id); c.gone.add(ev.id); }
+        } else if (!c.gone.has(ev.id)) unknownId(w, c, ev.id, 'move');
+        break;
+      }
+      case 'fire':
+        if (!v.has(ev.id) && !c.gone.has(ev.id)) {
+          const dt = Math.max(0, c.maxPktTick - ev.tick);
+          const x = ev.x + ev.vx * dt, y = ev.y + ev.vy * dt;
+          if (x > W + 10 || x < -10 || y < -10 || y > H + 10) { c.gone.add(ev.id); break; }
+          v.set(ev.id, { id: ev.id, kind: ev.kind, x, y, vx: ev.vx, vy: ev.vy, local: true });
+        }
+        break;
+      case 'destroy': {
+        const e = v.get(ev.id);
+        if (e) { v.delete(ev.id); if (e.kind === ENEMY) boom(c, e.x, e.y, w.now); }
+        else if (ev.kind === ENEMY && !c.gone.has(ev.id)) unknownId(w, c, ev.id, 'destroy');
+        c.gone.add(ev.id);
+        break;
+      }
+      case 'kill':
+        v.delete(ev.id);
+        c.gone.add(ev.id);
+        boom(c, ev.x, ev.y, w.now);
+        note(c, `Player ${ev.player}'s Ship was destroyed`, w.now);
+        break;
+      case 'leave':
+        for (const [id, e] of v) if (e.kind === SHIP && e.player === ev.player) { v.delete(id); c.gone.add(id); }
+        heardLeave(w, c, ev.player, 'announcement');
+        break;
+      default:
+        break;
+    }
+  }
+  function unknownId(w, c, id, what) {
+    if (!isTarget(w, c) || c.unknown.has(what + id)) return;
+    c.unknown.add(what + id);
+    const k = kindName(w, id);
+    log(w, `Client ${c.i + 1}`, what === 'move'
+      ? `Gets "moved" messages for ${k} ${id}, which it never saw appear. It ignores them.`
+      : `Gets "destroyed" for ${k} ${id}, which it never saw appear.`, 'bad');
+  }
+  function moveLocalProjectiles(c) {
+    for (const [id, e] of c.view) {
+      if (!e.local) continue;
+      e.x += e.vx; e.y += e.vy;
+      if (e.x > W + 10 || e.x < -10 || e.y < -10 || e.y > H + 10) { c.view.delete(id); c.gone.add(id); }
+    }
+  }
+  function heardLeave(w, c, player, how) {
+    if (c.heardLeft.has(player)) return;
+    c.heardLeft.add(player);
+    note(c, `Player ${player} left`, w.now);
+    const at = w.crashAt[player - 1];
+    if (at != null) {
+      c.m.crashNoticed = w.now - at;
+      log(w, `Client ${c.i + 1}`, `Learns that Player ${player} left (${how}), ${fmtMs(w.now - at)} after the crash.`, 'good');
+    } else {
+      log(w, `Client ${c.i + 1}`, `Learns that Player ${player} left (${how}).`, 'info');
+    }
+  }
+  function clientSend(w, c, bits, got) {
+    const ap = w.approach, now = w.now, link = w.up[c.i], t = w.step;
+    if (ap === 'A-u') {
+      if (bits !== c.lastSentBits) {
+        c.lastSentBits = bits;
+        transmit(w, link, { kind: 'a-in', tick: t, events: [{ t: 'input', seq: t, bits }], size: WIRE.ipUdp + WIRE.header + WIRE.ev.input });
+        c.lastSend = now;
+      } else if (now - c.lastSend >= HEARTBEAT_MS) {
+        transmit(w, link, { kind: 'a-in', tick: t, events: [], size: WIRE.ipUdp + WIRE.header });
+        c.lastSend = now;
+      }
+    } else if (ap === 'A-r') {
+      if (bits !== c.lastSentBits) { c.lastSentBits = bits; relPush(c.rel, { t: 'input', seq: t, bits }, t, WIRE.ev.input); }
+      const msgs = relPick(c.rel, now);
+      if (msgs.length || got || now - c.lastSend >= HEARTBEAT_MS) {
+        const seq = c.seq++, a = ackOf(c.rx);
+        transmit(w, link, { kind: 'ar-in', seq, tick: t, ack: a.ack, ackBits: a.ackBits, msgs, size: WIRE.ipUdp + WIRE.header + msgSize(msgs) });
+        relSent(c.rel, seq, msgs, now);
+        c.lastSend = now;
+      }
+    } else if (ap === 'B' || ap === 'C') {
+      const n = Math.min(w.redundancy, c.hist.length);
+      const a = ackOf(c.rx);
+      transmit(w, link, { kind: 'in', seq: c.seq++, tick: t, last: t, bits: c.hist.slice(-n), ack: a.ack, ackBits: a.ackBits, size: WIRE.ipUdp + WIRE.header + WIRE.inputPrefix + n * WIRE.input });
+      c.lastSend = now;
+    } else if (ap === 'D') {
+      streamSend(w, link, c.tx, Object.assign({ kind: 'seg', tick: t, seqIn: t, bits, size: WIRE.ipTcp + WIRE.streamHeader + WIRE.input }, streamFields(c.srx)));
+      streamRetransmit(w, link, c.tx, () => streamFields(c.srx));
+      c.lastSend = now;
+    }
+  }
+  function holdWatch(w, c) {
+    const ap = w.approach;
+    let n = 0, id = 0;
+    if (ap === 'A-r' || ap === 'C') { n = c.relRx.buf.size; id = c.relRx.expect; }
+    else if (ap === 'D') { n = c.srx.buf.size; id = c.srx.expect; }
+    else return;
+    const now = w.now, who = `Client ${c.i + 1}`;
+    if (n > 0) {
+      c.m.holdMs += TICK_MS;
+      if (!c.holding) {
+        c.holding = true; c.holdStart = now; c.holdPeak = n; c.holdId = id; c.m.holdCount++;
+        if (isTarget(w, c)) {
+          if (ap === 'D') log(w, who, `Stream segment ${id} is missing. Everything received after it waits in line.`, 'bad');
+          else if (ap === 'A-r') log(w, who, `Message ${id} is missing. Every message received after it waits in line.`, 'bad');
+          else log(w, who, `A reliable event is missing; later events wait for its resend. Snapshots keep flowing.`, 'info');
+        }
+      }
+      if (n > c.holdPeak) c.holdPeak = n;
+    } else if (c.holding) {
+      c.holding = false;
+      if (isTarget(w, c)) {
+        const d = fmtMs(now - c.holdStart);
+        if (ap === 'D') log(w, who, `The resend of segment ${c.holdId} arrived after ${d}; ${c.holdPeak} waiting segment${c.holdPeak > 1 ? 's were' : ' was'} applied at once.`, 'info');
+        else if (ap === 'A-r') log(w, who, `Message ${c.holdId} arrived after ${d}; ${c.holdPeak} waiting message${c.holdPeak > 1 ? 's were' : ' was'} applied at once.`, 'info');
+        else log(w, who, `The missing reliable event arrived after ${d}.`, 'info');
+      }
+    }
+  }
+
+  /* ---------- Lockstep (E) ---------- */
+  function lockstepServer(w) {
+    const S = w.server, L = S.ls, now = w.now, d = w.inputDelay;
+    for (let i = 0; i < w.players; i++) {
+      for (const f of due(w.up[i], now)) {
+        const P = S.P[i];
+        if (!P.connected) continue;
+        P.lastHeard = now;
+        const p = f.pkt;
+        for (let k = 0; k < p.bits.length; k++) {
+          const t = p.first + k;
+          if (t >= L.need[i] && !L.inputs[i].has(t)) L.inputs[i].set(t, p.bits[k]);
+        }
+        while (L.inputs[i].has(L.need[i])) L.need[i]++;
+        if (p.ackB > L.acked[i]) L.acked[i] = p.ackB;
+      }
+    }
+    for (const P of S.P) if (P.connected && now - P.lastHeard > w.timeoutMs) timeOut(w, P);
+    const T = S.g.tick;
+    const missing = [];
+    if (T >= d) for (const P of S.P) if (P.connected && !L.inputs[P.player - 1].has(T)) missing.push(P.player);
+    if (!missing.length) {
+      const inputs = S.P.map(P => (P.connected ? { bits: T >= d ? L.inputs[P.player - 1].get(T) : 0, fire: false } : null));
+      const leaves = S.pendingLeaves;
+      S.pendingLeaves = [];
+      const events = [];
+      stepGame(S.g, inputs, leaves, events);
+      afterServerStep(w, events);
+      let mask = 0;
+      for (const P of S.P) if (P.connected) mask |= 1 << (P.player - 1);
+      L.bundles.set(T, { tick: T, mask, bits: inputs.map(x => (x ? x.bits : 0)), leaves });
+      for (const m of L.inputs) m.delete(T);
+      if (L.waiting) { L.waiting = false; log(w, 'Server', `The Match moves again after ${fmtMs(now - L.waitStart)} of waiting.`, 'info'); }
+      let lo = Infinity;
+      for (const P of S.P) if (P.connected) lo = Math.min(lo, L.acked[P.player - 1]);
+      for (const t of L.bundles.keys()) { if (t <= lo) L.bundles.delete(t); else break; }
+    } else {
+      if (!L.waiting) { L.waiting = true; L.waitStart = now; log(w, 'Server', `Everyone waits: no input yet from Player ${missing.join(' and ')} for Tick ${T}.`, 'bad'); }
+      L.waitingFor = missing; L.waitTick = T;
+    }
+    for (let i = 0; i < w.players; i++) {
+      if (!S.P[i].connected) continue;
+      const list = [];
+      for (let t = L.acked[i] + 1; t < S.g.tick && list.length < 32; t++) { const b = L.bundles.get(t); if (b) list.push(b); }
+      if (!list.length && now - L.lastSend[i] < HEARTBEAT_MS) continue;
+      let size = WIRE.ipUdp + WIRE.header + WIRE.bundlePrefix;
+      for (const b of list) size += WIRE.bundleMask + popcount(b.mask) * WIRE.bundleInput;
+      transmit(w, w.down[i], { kind: 'ls-b', tick: S.g.tick, bundles: list, inAck: L.need[i] - 1, size });
+      L.lastSend[i] = now;
+    }
+  }
+  function lockstepClient(w, c) {
+    const now = w.now, d = w.inputDelay, ls = c.ls;
+    for (const f of due(w.down[c.i], now)) {
+      const p = f.pkt;
+      for (const b of p.bundles) if (b.tick >= ls.g.tick && !ls.bundles.has(b.tick)) ls.bundles.set(b.tick, b);
+      if (p.inAck > ls.ackedIn) {
+        ls.ackedIn = p.inAck;
+        for (const t of Array.from(ls.mine.keys())) if (t <= ls.ackedIn) ls.mine.delete(t);
+      }
+    }
+    const T = ls.g.tick;
+    const b = ls.bundles.get(T);
+    if (b) {
+      ls.bundles.delete(T);
+      const inputs = [];
+      for (let i = 0; i < 4; i++) inputs.push((b.mask >> i) & 1 ? { bits: b.bits[i] || 0, fire: false } : null);
+      const events = [];
+      stepGame(ls.g, inputs, b.leaves, events);
+      for (const ev of events) {
+        if (ev.t === 'destroy' && ev.kind === ENEMY) boom(c, ev.x, ev.y, now);
+        else if (ev.t === 'kill') { boom(c, ev.x, ev.y, now); note(c, `Player ${ev.player}'s Ship was destroyed`, now); }
+        else if (ev.t === 'leave') heardLeave(w, c, ev.player, 'input bundle');
+      }
+      const t = T + d;
+      const bits = inputFor(w, c.player, t);
+      if (bits !== ls.lastBits) { c.pend.push({ seq: t, time: now }); if (c.pend.length > 50) c.pend.shift(); ls.lastBits = bits; }
+      ls.mine.set(t, bits);
+      if (ls.mine.size > 600) ls.mine.delete(ls.mine.keys().next().value);
+      ls.waiting = false;
+    } else {
+      c.m.stallMs += TICK_MS;
+      ls.waiting = true;
+    }
+    while (c.pend.length && ls.g.tick > c.pend[0].seq) { addReact(c, now - c.pend[0].time); c.pend.shift(); }
+    let ackB = ls.g.tick - 1;
+    while (ls.bundles.has(ackB + 1)) ackB++;
+    if (ls.mine.size || now - c.lastSend >= HEARTBEAT_MS) {
+      const ticks = Array.from(ls.mine.keys()).slice(0, 32);
+      transmit(w, w.up[c.i], {
+        kind: 'ls-in', tick: w.step, first: ticks.length ? ticks[0] : 0, bits: ticks.map(t => ls.mine.get(t)), ackB,
+        size: WIRE.ipUdp + WIRE.header + WIRE.inputPrefix + ticks.length * WIRE.input,
+      });
+      c.lastSend = now;
+    }
+  }
+
+  /* ---------- Measurements ---------- */
+  function measure(w, c) {
+    const S = w.server, now = w.now, E = w.approach === 'E';
+    const v = E ? c.ls.g.tick : c.viewTick;
+    c.m.age = Math.max(0, (S.g.tick - v) * TICK_MS);
+    c.flags.clear();
+    let n = 0, sum = 0, gs = 0, gl = 0;
+    const seen = new Set();
+    const list = E ? c.ls.g.ents : c.view.values();
+    for (const e of list) {
+      seen.add(e.id);
+      const s = S.byId.get(e.id);
+      if (s) { if (vis(s.x) || vis(e.x)) { sum += Math.hypot(s.x - e.x, s.y - e.y); n++; } continue; }
+      if (!vis(e.x)) continue;
+      const L = S.life.get(e.id);
+      if (L && L.death > v) { gl++; c.flags.set(e.id, 1); } else { gs++; c.flags.set(e.id, 2); }
+    }
+    let ml = 0, mt = 0;
+    const miss = [];
+    for (const s of S.g.ents) {
+      if (seen.has(s.id) || !vis(s.x)) continue;
+      const L = S.life.get(s.id);
+      const lost = !!L && L.spawn <= v;
+      if (lost) ml++; else mt++;
+      miss.push({ kind: s.kind, x: s.x, y: s.y, player: s.player || 0, lost });
+    }
+    c.missing = miss;
+    c.m.posErr = n ? sum / n : 0;
+    c.m.missLost = ml; c.m.missLate = mt; c.m.ghostStuck = gs; c.m.ghostLate = gl;
+    if (!E && v > 0 && S.g.tick - v < RING) {
+      const applied = S.applied[(v % RING) * 4 + c.i];
+      while (c.pend.length && c.pend[0].seq <= applied) { addReact(c, now - c.pend[0].time); c.pend.shift(); }
+    }
+    c.m.reactWait = c.pend.length ? now - c.pend[0].time : 0;
+    while (c.fx.length && now - c.fx[0].t > 500) c.fx.shift();
+    while (c.notes.length && now - c.notes[0].t > 4000) c.notes.shift();
+  }
+  const Q_MARKS = [500, 1000, 2000, 5000, 10000, 20000, 40000];
+  function watchQueues(w) {
+    const i = w.target - 1;
+    if (i < 0 || i >= w.players) return;
+    const l = w.down[i];
+    const q = Math.max(0, l.busyUntil - w.now);
+    while (l.qMark < Q_MARKS.length && q >= Q_MARKS[l.qMark]) {
+      log(w, 'Network', `Server → Client ${i + 1}: a packet sent now waits ${fmtMs(Q_MARKS[l.qMark])} in the queue before it can even leave (sending ${fmtRate(rate(l, w.step))} into a ${fmtRate(w.net.cap)} link).`, 'bad');
+      l.qMark++;
+    }
+    if (q < 100) l.qMark = 0;
+  }
+
+  /* ==========================================================================
+     Public surface
+     ========================================================================== */
+  function step(w) {
+    w.step++;
+    w.now = w.step * TICK_MS;
+    if (w.approach === 'E') lockstepServer(w); else serverTick(w);
+    for (const c of w.clients) {
+      if (c.crashed) { due(w.down[c.i], w.now); continue; }
+      if (w.approach === 'E') lockstepClient(w, c); else clientTick(w, c);
+    }
+    watchQueues(w);
+    for (const c of w.clients) if (!c.crashed) measure(w, c);
+  }
+
+  const TAG_TEXT = { wave: "the next Wave's spawn events", leave: 'the "Player left" announcement' };
+  function act(w, a) {
+    const i = a.client != null ? a.client - 1 : -1;
+    if (a.client != null && (i < 0 || i >= w.players)) return;
+    switch (a.type) {
+      case 'dropNext':
+        w.down[i].dropNext++;
+        log(w, 'You', `Armed: the next packet from the Server to Client ${a.client} will be lost.`, 'info');
+        break;
+      case 'dropNextWith':
+        w.down[i].dropTag = a.tag;
+        log(w, 'You', `Armed: the next packet to Client ${a.client} that carries ${TAG_TEXT[a.tag]} will be lost.`, 'info');
+        break;
+      case 'spike':
+        for (const l of [w.down[i], w.up[i]]) { l.spikeFrom = w.now; l.spikeUntil = w.now + (a.ms || 2000); l.spikeExtra = a.extra || 500; }
+        log(w, 'You', `Latency spike: packets to and from Client ${a.client} take ${a.extra || 500} ms longer for ${fmtMs(a.ms || 2000)}.`, 'info');
+        break;
+      case 'crash': {
+        const c = w.clients[i];
+        if (c.crashed) return;
+        c.crashed = true;
+        w.crashAt[i] = w.now;
+        log(w, 'You', `Client ${a.client} crashed. The Server cannot know yet: it only sees silence, and waits ${fmtMs(w.timeoutMs)} before giving up.`, 'bad');
+        break;
+      }
+      case 'net': Object.assign(w.net, a.net); break;
+      case 'param':
+        if (a.K) w.K = a.K;
+        if (a.redundancy) w.redundancy = a.redundancy;
+        if (a.timeoutMs) w.timeoutMs = a.timeoutMs;
+        break;
+      case 'manual': w.manual = !!a.on; w.manualBits = a.bits | 0; break;
+      case 'target': w.target = clamp(a.client, 1, w.players); break;
+      default: break;
+    }
+  }
+
+  function screen(w, who) {
+    const S = w.server;
+    if (who < 0) {
+      const L = S.ls;
+      return { truth: S.g.ents, waiting: L && L.waiting ? `Waiting for Player ${L.waitingFor.join(' and ')}'s input for Tick ${L.waitTick}` : '' };
+    }
+    const c = w.clients[who];
+    let waiting = '';
+    if (w.approach === 'E' && c.ls.waiting && !c.crashed) waiting = `Waiting for the inputs of Tick ${c.ls.g.tick}`;
+    else if (c.holding && (w.approach === 'A-r' || w.approach === 'D')) waiting = 'Waiting for a resend';
+    return {
+      truth: S.g.ents,
+      ents: w.approach === 'E' ? c.ls.g.ents : Array.from(c.view.values()),
+      flags: c.flags, missing: c.missing, fx: c.fx, notes: c.notes, now: w.now,
+      crashed: c.crashed, kicked: c.kicked, waiting,
+    };
+  }
+  function clientPanel(w, i) {
+    const c = w.clients[i], S = w.server, dl = w.down[i], ul = w.up[i];
+    return {
+      crashed: c.crashed, kicked: c.kicked, m: c.m,
+      viewTick: w.approach === 'E' ? c.ls.g.tick : c.viewTick,
+      down: rate(dl, w.step), up: rate(ul, w.step),
+      queue: Math.max(0, dl.busyUntil - w.now), upQueue: Math.max(0, ul.busyUntil - w.now),
+      sent: dl.sent, lost: dl.lost, dup: dl.dup, lastSize: dl.lastSize,
+      resent: w.approach === 'D' ? S.chan[i].tx.rtx : S.chan[i].rel.resent,
+      upLost: ul.lost,
+      armed: dl.dropNext > 0 ? 'the next packet' : dl.dropTag ? TAG_TEXT[dl.dropTag] : '',
+      spiking: w.now < dl.spikeUntil,
+    };
+  }
+  function serverInfo(w) {
+    const S = w.server, g = S.g;
+    let ships = 0, enemies = 0, projs = 0;
+    for (const e of g.ents) { if (e.kind === SHIP) ships++; else if (e.kind === ENEMY) enemies++; else projs++; }
+    const n = g.ents.length;
+    return {
+      tick: g.tick, step: w.step, ships, enemies, projs, total: n,
+      connected: S.P.filter(P => P.connected).length, players: w.players,
+      K: w.K, perSecond: TICK_HZ / w.K,
+      snapBytes: WIRE.ipUdp + WIRE.header + WIRE.snapshotPrefix + WIRE.entity * n,
+      segBytes: WIRE.ipTcp + WIRE.streamHeader + WIRE.snapshotPrefix + WIRE.entity * n,
+      lostInputs: S.P.reduce((s, P) => s + P.lostInputs, 0),
+      behind: (w.step - g.tick) * TICK_MS,
+      waiting: S.ls && S.ls.waiting ? { players: S.ls.waitingFor.slice(), tick: S.ls.waitTick } : null,
+    };
+  }
+  function summary(w) {
+    const S = w.server;
+    const live = w.clients.filter(c => !c.crashed && !c.kicked);
+    const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+    const ages = live.map(c => c.m.age);
+    const reacts = live.map(c => c.m.react).filter(x => x != null);
+    const noticed = w.clients.map(c => c.m.crashNoticed).filter(x => x != null);
+    const served = w.clients.filter((c, i) => S.P[i].connected).map(c => c.i);
+    let lost = 0, resent = 0, hold = 0;
+    w.clients.forEach((c, i) => {
+      lost += w.down[i].lost;
+      resent += w.approach === 'D' ? S.chan[i].tx.rtx : S.chan[i].rel.resent;
+      // C only ever holds back presentation events; what the Client shows never waits.
+      hold += (w.approach === 'C' ? 0 : c.m.holdMs) + c.m.stallMs;
+    });
+    return {
+      age: avg(ages), ageMax: ages.length ? Math.max(...ages) : 0,
+      posErr: avg(live.map(c => c.m.posErr)),
+      missLost: live.reduce((s, c) => s + c.m.missLost, 0),
+      ghostStuck: live.reduce((s, c) => s + c.m.ghostStuck, 0),
+      react: reacts.length ? avg(reacts) : null,
+      down: avg(served.map(i => rate(w.down[i], w.step))),
+      up: avg(served.map(i => rate(w.up[i], w.step))),
+      queue: avg(served.map(i => Math.max(0, w.down[i].busyUntil - w.now))),
+      lost, resent, hold,
+      noticed: noticed.length ? avg(noticed) : null,
+      behind: (w.step - S.g.tick) * TICK_MS,
+      cap: w.net.cap,
+    };
+  }
+  function logSince(w, n) { return w.log.filter(e => e.n > n); }
+
+  const api = {
+    TICK_HZ, TICK_MS, W, H, WIRE, APPROACHES, KIND: { SHIP, ENEMY, SHIP_PROJ, ENEMY_PROJ }, BIT: { UP, DOWN, LEFT, RIGHT, FIRE },
+    createWorld, step, act, screen, clientPanel, serverInfo, summary, logSince, fmtMs, fmtRate,
+  };
+  return Object.freeze(api);
+})();
+if (typeof module === 'object' && module.exports) module.exports = Netcode;
+</script>
+
+<script>
+/* ============================================================================
+   Page shell: settings, drawing, walkthroughs. Throwaway.
+   ============================================================================ */
+(() => {
+  'use strict';
+  const N = Netcode;
+  const $ = id => document.getElementById(id);
+  const h = (tag, attrs, ...kids) => {
+    const e = document.createElement(tag);
+    if (attrs) for (const k in attrs) {
+      if (k === 'class') e.className = attrs[k];
+      else if (k === 'text') e.textContent = attrs[k];
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    }
+    for (const kid of kids) if (kid != null) e.append(kid);
+    return e;
+  };
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const fmtMs = N.fmtMs, fmtRate = N.fmtRate;
+  const secs = step => (step / N.TICK_HZ).toFixed(2) + ' s';
+
+  const DEFAULTS = {
+    left: 'B', right: 'A-u', players: 3, seed: 7, K: 1, redundancy: 3, inputDelay: 10, timeoutMs: 3000, enemiesPerWave: 5, target: 2,
+    net: { latency: 60, jitter: 10, loss: 0.02, dup: 0, reorder: 0, cap: 0 },
+  };
+  const LABEL = {
+    'A-u': 'A · events, unreliable', 'A-r': 'A · events, reliable', 'B': 'B · snapshots', 'C': 'C · hybrid', 'D': 'D · TCP-like', 'E': 'E · lockstep',
+  };
+  const ui = {
+    s: clone(DEFAULTS), worlds: [], views: [], playing: false, speed: 1, until: null, acc: 0, last: 0,
+    dirty: true, forceDom: true, lastDom: 0, mark: [], manualOn: false, keys: 0, walk: 0, wstep: 0, colors: null,
+  };
+
+  /* ---------- Colours from the theme tokens ---------- */
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = n => cs.getPropertyValue(n).trim();
+    ui.colors = { screen: v('--screen'), grid: v('--screen-grid'), truth: v('--screen-truth'), view: v('--screen-view'), bad: v('--screen-bad'), text: v('--screen-text'), mono: v('--font-mono') };
+    ui.dirty = true;
+  }
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', readColors);
+  }
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  /* ---------- Worlds ---------- */
+  function makeWorlds() {
+    const s = ui.s;
+    const ids = [s.left].concat(s.right !== 'none' ? [s.right] : []);
+    ui.worlds = ids.map(ap => N.createWorld({
+      approach: ap, players: s.players, seed: s.seed, K: s.K, redundancy: s.redundancy, inputDelay: s.inputDelay,
+      timeoutMs: s.timeoutMs, enemiesPerWave: s.enemiesPerWave, target: Math.min(s.target, s.players), net: clone(s.net),
+    }));
+    for (const w of ui.worlds) N.act(w, { type: 'manual', on: ui.manualOn, bits: ui.keys });
+    ui.mark = ui.worlds.map(() => 0);
+    buildWorldDom();
+    ui.dirty = true; ui.forceDom = true;
+  }
+  function advance(n) {
+    for (let k = 0; k < n; k++) for (const w of ui.worlds) N.step(w);
+    ui.dirty = true;
+  }
+  function markAction() { ui.mark = ui.worlds.map(w => w.logSeq); ui.forceDom = true; }
+  function actAll(a) { for (const w of ui.worlds) N.act(w, a); ui.forceDom = true; ui.dirty = true; }
+
+  /* ---------- Time ---------- */
+  function setPlaying(on) {
+    ui.playing = on;
+    if (!on) ui.until = null;
+    $('play').textContent = on ? 'Pause' : 'Play';
+    ui.acc = 0;
+    renderWalk();
+  }
+  function runUntil(step) { ui.until = step; ui.playing = true; $('play').textContent = 'Pause'; ui.acc = 0; renderWalk(); }
+  function finishRun() {
+    if (ui.until == null) return;
+    const target = ui.until;
+    while (ui.worlds[0].step < target) advance(1);
+    ui.until = null; setPlaying(false);
+  }
+  function frame(ts) {
+    const dt = Math.min(250, ts - (ui.last || ts));
+    ui.last = ts;
+    if (ui.playing && ui.worlds.length) {
+      ui.acc += dt * ui.speed;
+      let n = 0;
+      while (ui.acc >= N.TICK_MS && n < 40) {
+        if (ui.until != null && ui.worlds[0].step >= ui.until) break;
+        advance(1); ui.acc -= N.TICK_MS; n++;
+      }
+      if (n >= 40) ui.acc = 0;
+      if (ui.until != null && ui.worlds[0].step >= ui.until) { ui.until = null; setPlaying(false); ui.forceDom = true; }
+    }
+    if (ui.dirty) { drawAll(); ui.dirty = false; }
+    if (ui.forceDom || ts - ui.lastDom > 150) { renderDom(); ui.lastDom = ts; ui.forceDom = false; }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- World DOM ---------- */
+  function kvRows(dl, keys) {
+    const refs = {};
+    for (const [k, label] of keys) {
+      const dt = h('dt', { text: label }), dd = h('dd', { text: '' });
+      dl.append(dt, dd);
+      refs[k] = { dt, dd };
+    }
+    return refs;
+  }
+  function worldSubtitle(w) {
+    const k = w.K === 1 ? 'every Tick' : `every ${w.K} Ticks`;
+    switch (w.approach) {
+      case 'A-u': return `Events, each sent once. The Server sends ${k}.`;
+      case 'A-r': return `Events with confirmations and resends, applied strictly in order. The Server sends ${k}.`;
+      case 'B': return `Full state ${k}, unreliable, newest wins. Clients repeat their last ${w.redundancy} inputs in every packet.`;
+      case 'C': return `B's snapshots (${k}), plus reliable explosions, "Ship destroyed" and "Player left".`;
+      case 'D': return `B's snapshots (${k}) on one reliable ordered stream. Resend after max(200 ms, 2 × round trip).`;
+      case 'E': return `Only inputs travel. Input delay: ${w.inputDelay} Ticks (${Math.round(w.inputDelay * N.TICK_MS)} ms).`;
+      default: return '';
+    }
+  }
+  function buildWorldDom() {
+    const host = $('worlds');
+    host.textContent = '';
+    host.classList.toggle('two', ui.worlds.length === 2);
+    ui.views = ui.worlds.map(w => {
+      const meta = N.APPROACHES[w.approach];
+      const sub = h('p', { text: worldSubtitle(w) });
+      const head = h('div', { class: 'world-h' },
+        h('h3', null, h('span', { class: 'letter', text: meta.letter }), meta.name), sub);
+      const scv = h('canvas', { width: '640', height: '360', role: 'img', 'aria-label': `Server truth, ${meta.name}` });
+      const scap = h('figcaption', null, h('b', { text: 'Server: the truth' }), h('span', { class: 'num', text: '' }));
+      const sdl = h('dl', { class: 'kv' });
+      const srefs = kvRows(sdl, [['players', 'Players'], ['ents', 'Entities'], ['cost', 'Sending'], ['extra', '']]);
+      const server = h('div', { class: 'server' }, h('figure', { class: 'screen' }, scv, scap), sdl);
+      const clientsHost = h('div', { class: 'clients' });
+      const clients = w.clients.map((c, i) => {
+        const cv = h('canvas', { width: '640', height: '360', role: 'img', 'aria-label': `What Client ${i + 1} shows` });
+        const cap = h('figcaption', null, h('b', { text: `Client ${i + 1}` }), h('span', { class: 'num', text: '' }));
+        const dl = h('dl', { class: 'kv' });
+        const refs = kvRows(dl, [
+          ['age', 'Late by'], ['err', 'Position error'], ['miss', 'Missing'], ['ghost', 'Ghosts'], ['react', 'Own Ship reacts'],
+          ['down', 'Down'], ['up', 'Up'], ['pk', 'Packets to it'], ['hold', 'Held back'], ['crash', 'Crash noticed'],
+        ]);
+        const armed = h('p', { class: 'armed', text: '' });
+        clientsHost.append(h('article', { class: 'client' }, h('figure', { class: 'screen' }, cv, cap), dl, armed));
+        return { cv, cap: cap.lastChild, refs, armed };
+      });
+      host.append(h('section', { class: 'world' }, head, server, clientsHost));
+      return { w, sub, scv, scap: scap.lastChild, srefs, clients };
+    });
+  }
+
+  /* ---------- Drawing ---------- */
+  function drawShape(ctx, e, mode, color, k) {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(1.4, 1.2 / k);
+    if (mode === 'dashed') ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    if (e.kind === 0) { ctx.moveTo(e.x + 11, e.y); ctx.lineTo(e.x - 8, e.y - 8); ctx.lineTo(e.x - 8, e.y + 8); ctx.closePath(); }
+    else if (e.kind === 1) ctx.arc(e.x, e.y, 10, 0, Math.PI * 2);
+    else if (e.kind === 2) ctx.rect(e.x - 5, e.y - 1.5, 10, 3);
+    else ctx.arc(e.x, e.y, 3.2, 0, Math.PI * 2);
+    if (mode === 'fill') ctx.fill(); else ctx.stroke();
+    ctx.restore();
+  }
+  function drawScreen(cv, w, who) {
+    const cw = cv.clientWidth;
+    if (!cw) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const pw = Math.round(cw * dpr), ph = Math.round(cw * 9 / 16 * dpr);
+    if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+    const ctx = cv.getContext('2d');
+    const C = ui.colors, k = pw / N.W;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = C.screen; ctx.fillRect(0, 0, pw, ph);
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    ctx.strokeStyle = C.grid; ctx.lineWidth = 1 / k;
+    ctx.beginPath();
+    for (let x = 80; x < N.W; x += 80) { ctx.moveTo(x, 0); ctx.lineTo(x, N.H); }
+    for (let y = 90; y < N.H; y += 90) { ctx.moveTo(0, y); ctx.lineTo(N.W, y); }
+    ctx.stroke();
+    const v = N.screen(w, who);
+    const labels = cw >= 300;
+    const texts = [];
+    if (who < 0) {
+      for (const e of v.truth) { drawShape(ctx, e, 'fill', C.text, k); if (labels && e.kind === 0) texts.push([e.x - 16, e.y - 11, String(e.player), C.text]); }
+    } else {
+      ctx.globalAlpha = 0.75;
+      for (const e of v.truth) drawShape(ctx, e, 'outline', C.truth, k);
+      ctx.globalAlpha = 1;
+      for (const m of v.missing) if (m.lost) drawShape(ctx, m, 'dashed', C.bad, k);
+      for (const e of v.ents) {
+        const f = v.flags.get(e.id) || 0;
+        drawShape(ctx, e, 'fill', f === 2 ? C.bad : C.view, k);
+        if (labels && e.kind === 0) texts.push([e.x - 16, e.y - 11, String(e.player), f === 2 ? C.bad : C.view]);
+      }
+      ctx.lineWidth = 2;
+      for (const fx of v.fx) {
+        const a = 1 - (v.now - fx.t) / 500;
+        ctx.globalAlpha = Math.max(0.15, a);
+        ctx.strokeStyle = C.view;
+        ctx.beginPath(); ctx.arc(fx.x, fx.y, 18, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const fs = Math.round((cw < 300 ? 10 : 11) * dpr);
+    ctx.font = `${fs}px ${C.mono || 'monospace'}`;
+    ctx.textBaseline = 'top';
+    for (const [x, y, t, col] of texts) { ctx.fillStyle = col; ctx.fillText(t, x * k, y * k); }
+    if (who >= 0) {
+      let y = 6 * dpr;
+      for (const n of v.notes) { ctx.fillStyle = C.text; ctx.fillText(n.text, 6 * dpr, y); y += fs + 3 * dpr; }
+    }
+    const banner = who < 0 ? v.waiting : v.crashed ? 'Client crashed' : v.kicked ? 'Dropped by the Server (timed out)' : v.waiting;
+    if (banner) {
+      ctx.font = `600 ${Math.round(fs * 1.1)}px ${C.mono || 'monospace'}`;
+      const tw = ctx.measureText(banner).width;
+      const bx = (pw - tw) / 2 - 8 * dpr, by = ph - fs * 2.6;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(bx, by, tw + 16 * dpr, fs * 1.9);
+      ctx.fillStyle = v.crashed || v.kicked || who < 0 ? C.bad : C.text;
+      ctx.fillText(banner, bx + 8 * dpr, by + fs * 0.4);
+    }
+    if (who >= 0 && v.crashed) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, pw, ph); }
+  }
+  function drawAll() {
+    if (!ui.colors) readColors();
+    for (const vw of ui.views) {
+      drawScreen(vw.scv, vw.w, -1);
+      vw.clients.forEach((cl, i) => drawScreen(cl.cv, vw.w, i));
+    }
+  }
+
+  /* ---------- DOM rendering ---------- */
+  const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+  const setBad = (el, bad) => el.classList.toggle('is-bad', !!bad);
+  function renderDom() {
+    if (!ui.worlds.length) return;
+    const w0 = ui.worlds[0];
+    setText($('clock'), `Tick ${w0.step} · ${secs(w0.step)}`);
+    for (const vw of ui.views) renderWorld(vw);
+    renderScore();
+    renderCallout();
+    renderLog();
+    renderLiveSize();
+    renderMirror();
+  }
+  function renderWorld(vw) {
+    const w = vw.w, si = N.serverInfo(w);
+    setText(vw.sub, worldSubtitle(w));
+    setText(vw.scap, `Tick ${si.tick} · ${secs(si.tick)}`);
+    const r = vw.srefs;
+    setText(r.players.dd, `${si.connected} of ${si.players} connected`);
+    setText(r.ents.dd, `${si.total}: ${si.ships} Ships, ${si.enemies} Enemies, ${si.projs} Projectiles`);
+    const ap = w.approach;
+    if (ap === 'B' || ap === 'C') setText(r.cost.dd, `snapshot ${si.snapBytes} B × ${fmtPerSec(si.perSecond)} = ${fmtRate(si.snapBytes * si.perSecond)} per Client`);
+    else if (ap === 'D') setText(r.cost.dd, `segment ${si.segBytes} B × ${fmtPerSec(si.perSecond)} = ${fmtRate(si.segBytes * si.perSecond)} per Client, plus resends`);
+    else if (ap === 'E') setText(r.cost.dd, 'input bundles only (see Down on each Client)');
+    else setText(r.cost.dd, `last packet to Client 1: ${N.clientPanel(w, 0).lastSize} B, ${fmtPerSec(si.perSecond)}`);
+    if (ap === 'E') {
+      r.extra.dt.textContent = 'Behind real time';
+      setText(r.extra.dd, fmtMs(si.behind) + (si.waiting ? ` · waiting for Player ${si.waiting.players.join(' and ')}` : ''));
+      setBad(r.extra.dd, si.waiting || si.behind > 500);
+    } else if (ap === 'B' || ap === 'C') {
+      r.extra.dt.textContent = 'Inputs never received';
+      setText(r.extra.dd, `${si.lostInputs} (each packet repeats the last ${w.redundancy})`);
+      setBad(r.extra.dd, si.lostInputs > 0);
+    } else {
+      r.extra.dt.textContent = 'Send rate';
+      setText(r.extra.dd, fmtPerSec(si.perSecond));
+      setBad(r.extra.dd, false);
+    }
+    vw.clients.forEach((cl, i) => renderClient(w, i, cl));
+  }
+  function fmtPerSec(n) { return `${Number.isInteger(n) ? n : n.toFixed(1)}/s`; }
+  function renderClient(w, i, cl) {
+    const p = N.clientPanel(w, i), m = p.m, R = cl.refs, ap = w.approach;
+    setText(cl.cap, p.crashed ? 'crashed' : p.kicked ? 'timed out' : `showing Tick ${p.viewTick}`);
+    setText(R.age.dd, `${fmtMs(m.age)}`); setBad(R.age.dd, m.age > 400);
+    setText(R.err.dd, `${m.posErr.toFixed(1)} px`);
+    setText(R.miss.dd, `${m.missLost} wrong · ${m.missLate} late`); setBad(R.miss.dd, m.missLost > 0);
+    setText(R.ghost.dd, `${m.ghostStuck} wrong · ${m.ghostLate} late`); setBad(R.ghost.dd, m.ghostStuck > 0);
+    setText(R.react.dd, m.reactWait > 1000 ? `still waiting, ${fmtMs(m.reactWait)}` : m.react == null ? '…' : fmtMs(m.react));
+    setBad(R.react.dd, m.reactWait > 1000 || m.react > 400);
+    const cap = w.net.cap;
+    setText(R.down.dd, `${fmtRate(p.down)}${cap ? ` of ${fmtRate(cap)}` : ''}${p.queue > 20 ? ` · queue ${fmtMs(p.queue)}` : ''}`);
+    setBad(R.down.dd, p.queue > 200);
+    setText(R.up.dd, `${fmtRate(p.up)}${p.upQueue > 20 ? ` · queue ${fmtMs(p.upQueue)}` : ''}`);
+    setText(R.pk.dd, `${p.sent} sent, ${p.lost} lost${p.dup ? `, ${p.dup} dup` : ''}${ap === 'A-r' || ap === 'C' || ap === 'D' ? `, ${p.resent} resent` : ''}`);
+    if (ap === 'E') { R.hold.dt.textContent = 'Waited'; setText(R.hold.dd, `${fmtMs(m.stallMs)} in total`); setBad(R.hold.dd, m.stallMs > 250); }
+    else if (ap === 'A-r' || ap === 'D') { R.hold.dt.textContent = 'Held back'; setText(R.hold.dd, `${m.holdCount}×, ${fmtMs(m.holdMs)} in total`); setBad(R.hold.dd, m.holdMs > 0); }
+    else if (ap === 'C') { R.hold.dt.textContent = 'Events held'; setText(R.hold.dd, `${m.holdCount}×, ${fmtMs(m.holdMs)}; state never waits`); setBad(R.hold.dd, false); }
+    else { R.hold.dt.textContent = 'Held back'; setText(R.hold.dd, 'never'); setBad(R.hold.dd, false); }
+    const crashed = w.crashAt.some(x => x != null);
+    R.crash.dt.hidden = R.crash.dd.hidden = !crashed;
+    if (crashed) setText(R.crash.dd, p.crashed ? 'it is the crashed one' : m.crashNoticed != null ? `${fmtMs(m.crashNoticed)} after` : 'not yet');
+    setBad(R.crash.dd, crashed && !p.crashed && m.crashNoticed == null);
+    setText(cl.armed, p.armed ? `Armed: ${p.armed} to Client ${i + 1} will be lost.` : p.spiking ? `Latency spike in progress on Client ${i + 1}.` : '');
+  }
+  function renderScore() {
+    const t = $('score');
+    const sums = ui.worlds.map(N.summary);
+    const anyE = ui.worlds.some(w => w.approach === 'E');
+    const anyCrash = ui.worlds.some(w => w.crashAt.some(x => x != null));
+    const rows = [
+      ['Late by (average · worst)', s => `${fmtMs(s.age)} · ${fmtMs(s.ageMax)}`, s => s.ageMax > 400],
+      ['Position error (average)', s => `${s.posErr.toFixed(1)} px`, () => false],
+      ['Missing that should be there', s => String(s.missLost), s => s.missLost > 0],
+      ['Ghosts that should be gone', s => String(s.ghostStuck), s => s.ghostStuck > 0],
+      ['Own Ship reacts after', s => (s.react == null ? '…' : fmtMs(s.react)), s => s.react > 400],
+      ['Down per Client', s => `${fmtRate(s.down)}${s.cap ? ` of ${fmtRate(s.cap)}` : ''}${s.queue > 20 ? ` · queue ${fmtMs(s.queue)}` : ''}`, s => s.queue > 200],
+      ['Up per Client', s => fmtRate(s.up), () => false],
+      ['Packets lost · resent (to Clients)', s => `${s.lost} · ${s.resent}`, () => false],
+      ['Screen held back or waiting (all Clients)', s => fmtMs(s.hold), s => s.hold > 0],
+    ];
+    if (anyCrash) rows.push(['Crash noticed after (average)', s => (s.noticed == null ? 'not yet' : fmtMs(s.noticed)), () => false]);
+    if (anyE) rows.push(['Match behind real time', s => fmtMs(s.behind), s => s.behind > 500]);
+    if (!t.firstChild || t.dataset.shape !== rows.length + ':' + ui.worlds.length + ui.worlds.map(w => w.approach).join()) {
+      t.textContent = '';
+      t.dataset.shape = rows.length + ':' + ui.worlds.length + ui.worlds.map(w => w.approach).join();
+      const head = h('tr', null, h('th', { text: '' }), ...ui.worlds.map(w => h('th', { scope: 'col', text: LABEL[w.approach] })));
+      t.append(h('thead', null, head));
+      const body = h('tbody');
+      for (const [label] of rows) body.append(h('tr', null, h('th', { scope: 'row', text: label }), ...ui.worlds.map(() => h('td'))));
+      t.append(body);
+    }
+    const trs = t.tBodies[0].rows;
+    rows.forEach(([, fn, bad], r) => sums.forEach((s, c) => { const td = trs[r].cells[c + 1]; setText(td, fn(s)); setBad(td, bad(s)); }));
+  }
+  function entryLi(e, tag) {
+    return h('li', { class: `lvl-${e.level}` },
+      h('span', { class: 'when', text: secs(e.step) }),
+      h('span', { class: 'what' }, tag ? h('span', { class: 'tag', text: tag }) : null, h('span', { class: 'who', text: e.who }), e.text));
+  }
+  function collect(sinceMarks, limit) {
+    const all = [];
+    ui.worlds.forEach((w, i) => {
+      const tag = ui.worlds.length > 1 ? LABEL[w.approach].split(' · ')[0] + (w.approach === 'A-u' ? ' unrel.' : w.approach === 'A-r' ? ' rel.' : '') : '';
+      for (const e of N.logSince(w, sinceMarks ? sinceMarks[i] : 0)) all.push([e, tag]);
+    });
+    all.sort((a, b) => b[0].step - a[0].step || b[0].n - a[0].n);
+    return all.slice(0, limit);
+  }
+  let calloutKey = '';
+  function renderCallout() {
+    const items = collect(ui.mark, 7);
+    const key = items.map(([e, t]) => t + e.n).join();
+    if (key === calloutKey) return;
+    calloutKey = key;
+    const ul = $('callout');
+    ul.textContent = '';
+    if (!items.length) { ul.append(h('li', { class: 'empty' }, h('span', { class: 'when', text: '' }), h('span', { text: 'Nothing notable since your last action. The numbers below are live.' }))); return; }
+    for (const [e, tag] of items) ul.append(entryLi(e, tag));
+  }
+  let logKey = '';
+  function renderLog() {
+    const items = collect(null, 120);
+    const key = items.length ? items[0][1] + items[0][0].n + ':' + items.length : '';
+    if (key === logKey) return;
+    logKey = key;
+    const ul = $('log');
+    ul.textContent = '';
+    for (const [e, tag] of items) ul.append(entryLi(e, tag));
+  }
+  function renderLiveSize() {
+    const w = ui.worlds[0], si = N.serverInfo(w), W = N.WIRE;
+    let text;
+    if (w.approach === 'B' || w.approach === 'C') text = `Now (${LABEL[w.approach]}): one snapshot = ${W.ipUdp} + ${W.header} + ${W.snapshotPrefix} + ${W.entity} × ${si.total} entities = ${si.snapBytes} B, ${fmtPerSec(si.perSecond)} → ${fmtRate(si.snapBytes * si.perSecond)} to each Client. Inputs up: ${W.ipUdp} + ${W.header} + ${W.inputPrefix} + ${w.redundancy} × ${W.input} = ${W.ipUdp + W.header + W.inputPrefix + w.redundancy * W.input} B × 60/s = ${fmtRate((W.ipUdp + W.header + W.inputPrefix + w.redundancy * W.input) * 60)}.`;
+    else if (w.approach === 'D') text = `Now (${LABEL[w.approach]}): one segment = ${W.ipTcp} + ${W.streamHeader} + ${W.snapshotPrefix} + ${W.entity} × ${si.total} = ${si.segBytes} B, ${fmtPerSec(si.perSecond)} → ${fmtRate(si.segBytes * si.perSecond)} to each Client, plus resends.`;
+    else if (w.approach === 'E') text = `Now (${LABEL[w.approach]}): each packet = ${W.ipUdp} + ${W.header} + ${W.bundlePrefix} + for every unconfirmed Tick (${W.bundleMask} + ${W.bundleInput} per Player). At 60 packets per second the headers alone cost ${fmtRate((W.ipUdp + W.header) * 60)}.`;
+    else text = `Now (${LABEL[w.approach]}): the last packet to Client 1 was ${N.clientPanel(w, 0).lastSize} B = ${W.ipUdp} + ${W.header} + its events. At 60 packets per second the headers alone cost ${fmtRate((W.ipUdp + W.header) * 60)}.`;
+    setText($('live-size'), text);
+  }
+  function renderBytes() {
+    const W = N.WIRE, t = $('bytes');
+    const rows = [
+      ['Every UDP packet', 'IPv4 20 + UDP 8', W.ipUdp],
+      ['', 'Game header: protocol id 2, type 1, flags 1, Tick 4, sequence 2, ack 2, ack bits 4', W.header],
+      ['D, TCP-like', 'IPv4 20 + TCP 20 (TCP carries sequence and ack)', W.ipTcp],
+      ['', 'Game header: protocol id 2, type 1, flags 1, Tick 4', W.streamHeader],
+      ['Snapshot (B, C, D)', 'entity count 1, connected Players 1', W.snapshotPrefix],
+      ['', 'per entity: id 2, kind 1, Player or flags 1, x 2, y 2', W.entity],
+      ['Input (B, C)', 'count 1, then 1 byte per input (up, down, left, right, fire)', `${W.inputPrefix} + N`],
+      ['Events (A)', 'spawned: type 1, id 2, kind 1, x 2, y 2', W.ev.spawn],
+      ['', 'moved: type 1, id 2, x 2, y 2', W.ev.move],
+      ['', 'fired: type 1, Projectile 2, owner 2, x 2, y 2, vx 1, vy 1, Tick offset 1', W.ev.fire],
+      ['', 'destroyed: type 1, id 2', W.ev.destroy],
+      ['', 'Ship destroyed: type 1, Player 1, Ship 2, x 2, y 2', W.ev.kill],
+      ['', 'Player left: type 1, Player 1, reason 1', W.ev.leave],
+      ['', 'keys changed (Client to Server): type 1, keys 1', W.ev.input],
+      ['Reliable events (C)', 'explosion: type 1, x 2, y 2', W.ev.explosion],
+      ['', 'each reliable message (A reliable, C) adds its id', W.reliableId],
+      ['Lockstep (E)', 'Tick count 1, then per Tick: Players present 1 + 1 per Player', `${W.bundlePrefix} + …`],
+    ];
+    t.append(h('thead', null, h('tr', null, h('th', { text: 'Part' }), h('th', { text: 'Fields (bytes)' }), h('th', { text: 'Bytes' }))));
+    const body = h('tbody');
+    for (const [a, b, c] of rows) body.append(h('tr', null, h('td', { text: a }), h('td', { text: b }), h('td', { text: String(c) })));
+    t.append(body);
+  }
+
+  /* ---------- Free-play form ---------- */
+  const NET_FIELDS = [
+    ['net-latency', 'latency', 1, v => `${v} ms`],
+    ['net-jitter', 'jitter', 1, v => `${v} ms`],
+    ['net-loss', 'loss', 100, v => `${v}%`],
+    ['net-dup', 'dup', 100, v => `${v}%`],
+    ['net-reorder', 'reorder', 100, v => `${v}%`],
+  ];
+  function fillSelects() {
+    const opts = Object.keys(N.APPROACHES).map(id => [id, LABEL[id]]);
+    for (const [id, label] of opts) $('ap-left').append(h('option', { value: id, text: label }));
+    $('ap-right').append(h('option', { value: 'none', text: 'Nothing (one approach)' }));
+    for (const [id, label] of opts) $('ap-right').append(h('option', { value: id, text: label }));
+  }
+  function writeForm() {
+    const s = ui.s;
+    $('ap-left').value = s.left; $('ap-right').value = s.right; $('players').value = String(s.players); $('seed').value = String(s.seed);
+    for (const [id, key, mul] of NET_FIELDS) $(id).value = String(+(s.net[key] * mul).toFixed(2));
+    $('net-cap').value = String(s.net.cap);
+    $('p-k').value = String(s.K); $('p-red').value = String(s.redundancy); $('p-timeout').value = String(s.timeoutMs);
+    $('p-delay').value = String(s.inputDelay); $('p-wave').value = String(s.enemiesPerWave);
+    const tg = $('target');
+    tg.textContent = '';
+    for (let p = 1; p <= s.players; p++) tg.append(h('option', { value: String(p), text: `Client ${p}` }));
+    s.target = Math.min(s.target, s.players);
+    tg.value = String(s.target);
+    writeOutputs();
+  }
+  function writeOutputs() {
+    const s = ui.s;
+    for (const [id, key, mul, fmt] of NET_FIELDS) $(id + '-out').textContent = fmt(+(s.net[key] * mul).toFixed(2));
+    $('p-k-out').textContent = s.K === 1 ? 'every Tick (60/s)' : `${s.K} (${(60 / s.K).toFixed(1).replace('.0', '')}/s)`;
+    $('p-red-out').textContent = String(s.redundancy);
+    $('p-timeout-out').textContent = fmtMs(s.timeoutMs);
+    $('p-delay-out').textContent = `${s.inputDelay} Ticks (${Math.round(s.inputDelay * N.TICK_MS)} ms)`;
+    $('p-wave-out').textContent = String(s.enemiesPerWave);
+    const t = s.target;
+    $('act-drop').textContent = `Drop the next packet to Client ${t}`;
+    $('act-spike').textContent = `Latency spike on Client ${t} (500 ms for 2 s)`;
+    $('act-crash').textContent = `Crash Client ${t}`;
+  }
+  function readNet() {
+    const net = {};
+    for (const [id, key, mul] of NET_FIELDS) net[key] = Number($(id).value) / mul;
+    net.cap = Number($('net-cap').value);
+    return net;
+  }
+  function restartFromForm() {
+    const s = ui.s;
+    s.left = $('ap-left').value; s.right = $('ap-right').value; s.players = Number($('players').value);
+    s.seed = Math.max(1, Math.min(99999, Math.round(Number($('seed').value) || 1)));
+    s.inputDelay = Number($('p-delay').value); s.enemiesPerWave = Number($('p-wave').value);
+    writeForm();
+    makeWorlds();
+    setPlaying(false);
+  }
+  function wireForm() {
+    for (const id of ['ap-left', 'ap-right', 'players', 'seed', 'p-delay', 'p-wave']) $(id).addEventListener('change', restartFromForm);
+    const netChange = () => { ui.s.net = readNet(); writeOutputs(); actAll({ type: 'net', net: clone(ui.s.net) }); };
+    for (const [id] of NET_FIELDS) $(id).addEventListener('input', netChange);
+    $('net-cap').addEventListener('change', netChange);
+    $('p-k').addEventListener('input', () => { ui.s.K = Number($('p-k').value); writeOutputs(); actAll({ type: 'param', K: ui.s.K }); });
+    $('p-red').addEventListener('input', () => { ui.s.redundancy = Number($('p-red').value); writeOutputs(); actAll({ type: 'param', redundancy: ui.s.redundancy }); });
+    $('p-timeout').addEventListener('input', () => { ui.s.timeoutMs = Number($('p-timeout').value); writeOutputs(); actAll({ type: 'param', timeoutMs: ui.s.timeoutMs }); });
+    $('p-delay').addEventListener('input', () => { ui.s.inputDelay = Number($('p-delay').value); writeOutputs(); });
+    $('p-wave').addEventListener('input', () => { ui.s.enemiesPerWave = Number($('p-wave').value); writeOutputs(); });
+    $('target').addEventListener('change', () => { ui.s.target = Number($('target').value); writeOutputs(); actAll({ type: 'target', client: ui.s.target }); });
+    const preset = net => () => { Object.assign(ui.s.net, net); writeForm(); markAction(); actAll({ type: 'net', net: clone(ui.s.net) }); };
+    $('preset-good').addEventListener('click', preset({ latency: 20, jitter: 3, loss: 0, dup: 0, reorder: 0, cap: 0 }));
+    $('preset-appendix').addEventListener('click', preset({ latency: 150, jitter: 10, loss: 0.02, dup: 0.02, reorder: 0, cap: 0 }));
+    $('preset-5k').addEventListener('click', preset({ latency: 50, jitter: 5, loss: 0, dup: 0, reorder: 0, cap: 5000 }));
+    $('act-drop').addEventListener('click', () => { markAction(); actAll({ type: 'dropNext', client: ui.s.target }); });
+    $('act-spike').addEventListener('click', () => { markAction(); actAll({ type: 'spike', client: ui.s.target, extra: 500, ms: 2000 }); });
+    $('act-crash').addEventListener('click', () => { markAction(); actAll({ type: 'crash', client: ui.s.target }); });
+    $('manual').addEventListener('change', () => { ui.manualOn = $('manual').checked; ui.keys = 0; actAll({ type: 'manual', on: ui.manualOn, bits: 0 }); });
+
+    $('play').addEventListener('click', () => { if (!ui.playing) markAction(); setPlaying(!ui.playing); });
+    $('step-tick').addEventListener('click', () => { setPlaying(false); markAction(); advance(1); ui.forceDom = true; });
+    $('step-sec').addEventListener('click', () => { setPlaying(false); markAction(); advance(60); ui.forceDom = true; });
+    $('reset').addEventListener('click', () => { setPlaying(false); makeWorlds(); });
+    $('speed').addEventListener('change', () => { ui.speed = Number($('speed').value); });
+    $('mirror-btn').addEventListener('click', () => { if (ui.until != null) finishRun(); else doStep(ui.wstep); });
+  }
+
+  /* ---------- Keyboard: Player 1 ---------- */
+  const KEYS = { ArrowUp: N.BIT.UP, ArrowDown: N.BIT.DOWN, ArrowLeft: N.BIT.LEFT, ArrowRight: N.BIT.RIGHT, ' ': N.BIT.FIRE };
+  function onKey(e, down) {
+    if (!ui.manualOn || !(e.key in KEYS)) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' && e.target.type !== 'checkbox' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    if (down) ui.keys |= KEYS[e.key]; else ui.keys &= ~KEYS[e.key];
+    for (const w of ui.worlds) N.act(w, { type: 'manual', on: true, bits: ui.keys });
+  }
+  window.addEventListener('keydown', e => onKey(e, true));
+  window.addEventListener('keyup', e => onKey(e, false));
+  window.addEventListener('blur', () => { ui.keys = 0; for (const w of ui.worlds) N.act(w, { type: 'manual', on: ui.manualOn, bits: 0 }); });
+
+  /* ---------- Guided walkthroughs ---------- */
+  const base = over => {
+    const s = clone(DEFAULTS);
+    for (const k in over) { if (k === 'net') Object.assign(s.net, over.net); else s[k] = over[k]; }
+    return s;
+  };
+  const W = {
+    start(setup) { ui.s = clone(setup); writeForm(); makeWorlds(); setPlaying(false); },
+    run(sec) { runUntil(ui.worlds[0].step + Math.round(sec * N.TICK_HZ)); },
+    runTo(step) { runUntil(step); },
+    act(a) { actAll(a); },
+    net(partial) { Object.assign(ui.s.net, partial); writeForm(); actAll({ type: 'net', net: clone(ui.s.net) }); },
+    restart(over) { const s = ui.s; for (const k in over) { if (k === 'net') Object.assign(s.net, over.net); else s[k] = over[k]; } W.start(clone(s)); },
+  };
+  const WALKS = [
+    {
+      tab: '1 · Lost spawn',
+      title: 'A lost spawn event',
+      text: 'Approach A without reliability, 3 Players, 60 ms latency and 2% loss on every link. Each event is sent exactly once. We make sure the packet announcing Wave 2 is lost on its way to Client 2, then watch what Client 2 believes.',
+      watch: 'Watch Client 2: red dashed outlines are Enemies the Server has but Client 2 never heard of. Nothing ever corrects this: they stay invisible to Client 2 until they die.',
+      setup: base({ left: 'A-u', right: 'none', players: 3, net: { latency: 60, jitter: 10, loss: 0.02 } }),
+      steps: [
+        { label: 'Start: A unreliable, 3 Players, 60 ms, 2% loss', note: 'The Match restarts at Tick 0 with seed 7.', do: wk => W.start(wk.setup) },
+        { label: 'Run to 5.0 s', note: 'Wave 1 is on screen. Every Client agrees with the Server, about 60 ms late, apart from the odd message that 2% loss already took.', do: () => W.runTo(300) },
+        { label: 'Lose the packet announcing Wave 2 to Client 2', note: 'Armed. It fires when Wave 2 spawns at 5.5 s.', do: () => W.act({ type: 'dropNextWith', client: 2, tag: 'wave' }) },
+        { label: 'Run 1 second', note: 'Clients 1 and 3 show Wave 2; Client 2 shows red dashed outlines instead. The Server keeps sending "moved" for these Enemies and Client 2 ignores them (see the log).', do: () => W.run(1) },
+        { label: 'Run 5 seconds', note: 'The invisible Enemies fire: on Client 2, Projectiles come out of nowhere. When a Ship destroys one of them, Client 2 gets "destroyed" for an Enemy it never had.', do: () => W.run(5) },
+        { label: 'Run 20 seconds', note: 'Random loss takes other messages too, on any Client: a lost "destroyed" leaves a frozen ghost Enemy (red fill) that never goes away, a lost "fired" hides a Projectile for its whole flight. Nothing repairs them.', do: () => W.run(20) },
+      ],
+    },
+    {
+      tab: '2 · Self-healing',
+      title: 'Snapshots heal themselves',
+      text: 'Left: A without reliability. Right: B, a full snapshot every Tick. Same seed and same network, 60 ms and 10% loss on every link, so the network loses packets at the same moments on both sides.',
+      watch: 'Watch the scoreboard and Client 2. Left: missing Enemies and ghosts pile up. Right: both stay at 0; only "Late by" wobbles when a snapshot is lost.',
+      setup: base({ left: 'A-u', right: 'B', players: 3, net: { latency: 60, jitter: 10, loss: 0.1 } }),
+      steps: [
+        { label: 'Start: A unreliable (left) vs B (right), 60 ms, 10% loss', note: 'One packet in ten is lost, in both directions.', do: wk => W.start(wk.setup) },
+        { label: 'Run 3 seconds', note: 'Right: each lost snapshot only makes the view one Tick older until the next one replaces it.', do: () => W.run(3) },
+        { label: 'Lose the next packet to Client 2, on both sides', note: 'Armed on both sides.', do: () => W.act({ type: 'dropNext', client: 2 }) },
+        { label: 'Step 3 Ticks', note: 'Right: Client 2 skipped one snapshot and the next one replaced everything. Left: the events in that packet (see the log) are gone for good; only its "moved" messages get overwritten by newer ones.', do: () => { setPlaying(false); advance(3); ui.forceDom = true; } },
+        { label: 'Run 10 seconds', note: 'Left: missing Enemies, frozen ghosts and never-shown Projectiles keep appearing. Right stays exact, just late.', do: () => W.run(10) },
+      ],
+    },
+    {
+      tab: '3 · Appendix test',
+      title: "The appendix test: 150 ms, 2% loss, 2% duplication",
+      text: "The subject's appendix suggests testing with 2% packet drop or duplication and more than 150 ms of latency. Here: 150 ms one way, 10 ms jitter, 2% loss and 2% duplication on every link, 4 Players. Left: A, reliable and ordered. Right: C, snapshots plus a small reliable channel.",
+      watch: 'Watch "Late by" on each Client. Left: it jumps from about 160 ms to half a second whenever a packet is lost, because everything waits for the resend. Right: it stays near 160 ms; only explosions and notices wait.',
+      setup: base({ left: 'A-r', right: 'C', players: 4, net: { latency: 150, jitter: 10, loss: 0.02, dup: 0.02 } }),
+      steps: [
+        { label: 'Start: A reliable (left) vs C (right), 150 ms, 2% loss, 2% duplication', note: '4 Players. Both sides get the same network luck.', do: wk => W.start(wk.setup) },
+        { label: 'Run 5 seconds', note: 'Left: Client screens freeze, then jump, over and over ("Held back"). Right: state flows; now and then an explosion shows up late because its first copy was lost.', do: () => W.run(5) },
+        { label: 'Run 10 seconds', note: 'Compare "Late by (worst)" and "Screen held back or waiting" in the scoreboard.', do: () => W.run(10) },
+        { label: 'Switch the left side to B and restart', note: 'Now B (left) vs C (right) on the same network.', do: () => W.restart({ left: 'B' }) },
+        { label: 'Run 10 seconds', note: 'Same state quality on both sides, equally late. C also shows every explosion and "Ship destroyed" notice; B cannot tell a destroyed Enemy from one that left. Duplicates change nothing anywhere: every message names its entity and Tick.', do: () => W.run(10) },
+      ],
+    },
+    {
+      tab: '4 · 5 KB/s',
+      title: 'A 5 KB/s link with 60 full snapshots per second',
+      text: 'Approach B, one snapshot every Tick (60 per second), 4 Players, 50 ms latency, and every link capped at 5 KB/s (5,000 bytes per second). Whatever the Server sends beyond the cap waits in a queue in front of the link.',
+      watch: 'Watch "Down" and its queue on each Client, and "Late by", which grows with the queue.',
+      setup: base({ left: 'B', right: 'none', players: 4, net: { latency: 50, jitter: 5, loss: 0, cap: 5000 } }),
+      steps: [
+        { label: 'Start: B, 60 snapshots per second, 5 KB/s cap', note: 'Look at the snapshot size under the Server: every entity costs 8 bytes, every packet 44 bytes of headers.', do: wk => W.start(wk.setup) },
+        { label: 'Run 5 seconds', note: 'Each Client needs far more than 5 KB/s. The queue grows every second and the Clients fall seconds behind.', do: () => W.run(5) },
+        { label: 'Run 5 more seconds', note: 'Still growing: without a fix, the delay never stops increasing.', do: () => W.run(5) },
+        { label: 'Restart with one snapshot every 4 Ticks (15 per second)', note: 'Same Match, K = 4.', do: () => W.restart({ K: 4 }) },
+        { label: 'Run 5 seconds', note: 'It fits under the cap: no queue, and the view is only 50 to 130 ms old (a bit older than an uncapped 60 per second, since snapshots come less often).', do: () => W.run(5) },
+        { label: 'Restart at 60 per second with 2 Players and 1 Enemy per Wave', note: 'Fewer entities, K back to 1.', do: () => W.restart({ K: 1, players: 2, enemiesPerWave: 1 }) },
+        { label: 'Run 5 seconds', note: 'Still over the cap: at 60 packets per second the 44 bytes of headers alone take 2.6 KB/s. Sending less often is the main lever (delta compression, not modelled, is the next one).', do: () => W.run(5) },
+      ],
+    },
+    {
+      tab: '5 · Head-of-line',
+      title: 'Head-of-line blocking',
+      text: 'Left: D, snapshots on one reliable ordered stream, like TCP. Right: B, the same snapshots over plain UDP. 100 ms latency and no random loss, so the only loss is the one you cause.',
+      watch: 'Watch Client 2 on both sides after the lost packet.',
+      setup: base({ left: 'D', right: 'B', players: 3, net: { latency: 100, jitter: 5, loss: 0 } }),
+      steps: [
+        { label: 'Start: D (left) vs B (right), 100 ms, no loss', note: 'Both sides look the same.', do: wk => W.start(wk.setup) },
+        { label: 'Run 2 seconds', note: 'Both about 100 ms late.', do: () => W.run(2) },
+        { label: 'Lose the next packet to Client 2, on both sides', note: 'Armed on both sides.', do: () => W.act({ type: 'dropNext', client: 2 }) },
+        { label: 'Run 0.25 s', note: 'Left: Client 2 froze. Later packets arrive but wait behind the missing one ("Held back"). Right: Client 2 skipped one snapshot and moved on.', do: () => W.run(0.25) },
+        { label: 'Run 0.5 s', note: 'Left: the resend leaves after the timeout, about 450 ms, and every waiting snapshot is applied at once: the view jumps.', do: () => W.run(0.5) },
+        { label: 'Set loss to 3% and run 10 seconds', note: 'Left: every Client freezes regularly. Right: nothing ever freezes.', do: () => { W.net({ loss: 0.03 }); W.run(10); } },
+      ],
+    },
+    {
+      tab: '6 · Lockstep stall',
+      title: 'A lockstep stall',
+      text: 'Left: E, lockstep with 10 Ticks (167 ms) of input delay. Right: B for comparison. 3 Players, 30 ms latency, no loss.',
+      watch: 'Watch "Behind real time" under the left Server, and "Own Ship reacts".',
+      setup: base({ left: 'E', right: 'B', players: 3, inputDelay: 10, net: { latency: 30, jitter: 5, loss: 0 } }),
+      steps: [
+        { label: 'Start: E (left) vs B (right), 30 ms, input delay 10 Ticks', note: 'Lockstep Clients run the Match themselves.', do: wk => W.start(wk.setup) },
+        { label: 'Run 3 seconds', note: 'Lockstep runs smoothly: each Client shows exactly the Server state, about 30 ms late, with no errors. But your own Ship reacts only after the 167 ms input delay.', do: () => W.run(3) },
+        { label: 'Latency spike on Client 3 (500 ms for 2 s)', note: 'Only Client 3 gets a slow link.', do: () => W.act({ type: 'spike', client: 3, extra: 500, ms: 2000 }) },
+        { label: 'Run 3 seconds', note: 'Left: the Server and every Client wait for Player 3; the whole Match crawls. Right: only Client 3 is late.', do: () => W.run(3) },
+        { label: 'Crash Client 2', note: 'Client 2 goes silent.', do: () => W.act({ type: 'crash', client: 2 }) },
+        { label: 'Run 5 seconds', note: 'Left: everything stops for 3 s until the Server gives up on Player 2, then goes on without it. Right: the Match goes on; Ship 2 vanishes after 3 s.', do: () => W.run(5) },
+        { label: 'Restart at 150 ms latency', note: 'Inputs now need about 300 ms to go round through the Server; the input delay only covers 167 ms.', do: () => W.restart({ net: { latency: 150 } }) },
+        { label: 'Run 5 seconds', note: 'The Match runs at roughly half speed: "Behind real time" grows by about half a second every second.', do: () => W.run(5) },
+        { label: 'Restart with 20 Ticks of input delay', note: 'Input delay 333 ms.', do: () => W.restart({ inputDelay: 20 }) },
+        { label: 'Run 5 seconds', note: 'Full speed again, but every key press takes about a third of a second to show on your own Ship.', do: () => W.run(5) },
+      ],
+    },
+    {
+      tab: '7 · Client crash',
+      title: 'A Client crash, detected by timeout',
+      text: 'Left: A without reliability. Right: C. 4 Players, 60 ms latency, 2% loss, 3 s timeout. Client 2 crashes; the Server can only notice silence. We also lose the "Player 2 left" announcement to Client 3.',
+      watch: 'Watch Client 3 and the "Crash noticed" line on each Client.',
+      setup: base({ left: 'A-u', right: 'C', players: 4, timeoutMs: 3000, net: { latency: 60, jitter: 10, loss: 0.02 } }),
+      steps: [
+        { label: 'Start: A unreliable (left) vs C (right), 4 Players', note: 'Timeout 3 s.', do: wk => W.start(wk.setup) },
+        { label: 'Run 2 seconds', note: '', do: () => W.run(2) },
+        { label: 'Crash Client 2', note: 'Client 2 stops sending and receiving.', do: () => W.act({ type: 'crash', client: 2 }) },
+        { label: 'Run 1 second', note: 'The Server does not know yet. Ship 2 keeps flying with the last keys the Server got.', do: () => W.run(1) },
+        { label: 'Lose the "Player 2 left" announcement to Client 3, on both sides', note: 'Armed on both sides.', do: () => W.act({ type: 'dropNextWith', client: 3, tag: 'leave' }) },
+        { label: 'Run 3 seconds', note: 'About 3 s after Client 2 went silent, the Server declares Player 2 timed out and tells the others. Left: Client 3 never hears it, so Ship 2 stays frozen on its screen (red fill). Right: the announcement is resent and arrives one round trip later.', do: () => W.run(3) },
+        { label: 'Run 3 seconds', note: 'Left: the ghost Ship stays forever. Right: every Client knows.', do: () => W.run(3) },
+      ],
+    },
+  ];
+  function buildTabs() {
+    const host = $('tabs');
+    WALKS.forEach((wk, i) => host.append(h('button', {
+      type: 'button', class: 'tab', role: 'tab', id: `tab-${i}`, 'aria-controls': 'walk',
+      onclick: () => { ui.walk = i; ui.wstep = 0; renderTabs(); renderWalk(); }, text: wk.tab,
+    })));
+  }
+  function renderTabs() {
+    WALKS.forEach((wk, i) => $(`tab-${i}`).setAttribute('aria-selected', String(i === ui.walk)));
+  }
+  function doStep(j) {
+    const wk = WALKS[ui.walk];
+    if (j !== ui.wstep || ui.until != null || j >= wk.steps.length) return;
+    wk.steps[j].do(wk);
+    markAction();
+    ui.wstep = j + 1;
+    renderWalk();
+  }
+  function renderWalk() {
+    const host = $('walk');
+    if (!host) return;
+    const wk = WALKS[ui.walk], running = ui.until != null;
+    host.textContent = '';
+    host.setAttribute('aria-labelledby', `tab-${ui.walk}`);
+    host.append(h('h3', { text: wk.title }), h('p', { text: wk.text }), h('p', { class: 'watch', text: wk.watch }));
+    const ol = h('ol', { class: 'steps' });
+    wk.steps.forEach((st, j) => {
+      const state = j < ui.wstep ? 'done' : j === ui.wstep ? 'current' : 'todo';
+      const btn = h('button', { type: 'button', class: 'btn' + (state === 'current' ? ' primary' : ''), text: st.label, onclick: () => doStep(j) });
+      btn.disabled = state !== 'current' || running;
+      ol.append(h('li', { class: state }, btn, st.note ? h('p', { class: 'note', text: st.note }) : null));
+    });
+    host.append(ol);
+    if (ui.wstep > 0) host.append(h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn small', text: 'Restart this walkthrough', onclick: () => { setPlaying(false); ui.wstep = 0; doStep(0); } })));
+    renderMirror();
+  }
+  function renderMirror() {
+    const wk = WALKS[ui.walk];
+    const box = $('mirror');
+    const started = ui.wstep > 0;
+    box.hidden = !started;
+    if (!started) return;
+    const running = ui.until != null;
+    const done = ui.wstep >= wk.steps.length;
+    setText($('mirror-label'), running ? `Walkthrough ${ui.walk + 1}: running to ${secs(ui.until)}` : done ? `Walkthrough ${ui.walk + 1} finished` : `Walkthrough ${ui.walk + 1}, next step ${ui.wstep + 1} of ${wk.steps.length}:`);
+    const btn = $('mirror-btn');
+    btn.hidden = done && !running;
+    setText(btn, running ? 'Finish now' : done ? '' : wk.steps[ui.wstep].label);
+  }
+
+  /* ---------- Boot ---------- */
+  fillSelects();
+  buildTabs();
+  renderTabs();
+  renderBytes();
+  wireForm();
+  writeForm();
+  readColors();
+  makeWorlds();
+  advance(120);
+  renderWalk();
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  setPlaying(!reduce);
+  requestAnimationFrame(frame);
+  window.NetcodePage = { ui, WALKS, doStep, advance, finishRun };
+})();
+</script>
