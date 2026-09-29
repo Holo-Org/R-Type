@@ -1,0 +1,28 @@
+# xmake: project config cache, build output, generated IDE projects
+.xmake/
+build/
+vsxmake*/
+vs20*/
+*.sln
+*.vcxproj*
+Makefile
+makefile.xmake
+CMakeLists.txt
+
+# Editors and language servers
+.cache/
+.clangd
+compile_commands.json
+.vscode/
+.vs/
+.idea/
+
+# Program output
+*.log
+*.pcm
+*.gcm
+*.ifc
+*.o
+*.obj
+*.exe
+*.pdb

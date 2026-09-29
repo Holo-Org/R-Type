@@ -1,0 +1,89 @@
+{
+    __meta__ = {
+        version = "1.0"
+    },
+    ["macosx|arm64"] = {
+        ["asio 1.36.0#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "1.36.0"
+        },
+        ["cmake >=3.11#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "4.3.4"
+        },
+        ["ninja#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "v1.13.2"
+        },
+        ["opengl#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "latest"
+        },
+        ["raylib 6.0#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "6.0"
+        }
+    },
+    ["mingw|x86_64"] = {
+        ["asio 1.36.0#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "1.36.0"
+        },
+        ["cmake >=3.11#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "4.3.4"
+        },
+        ["ninja#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "v1.13.2"
+        },
+        ["opengl#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "latest"
+        },
+        ["raylib 6.0#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "33751c1ff7145bd5d07ac09f933d8caa749be35f",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "6.0"
+        }
+    }
+}
