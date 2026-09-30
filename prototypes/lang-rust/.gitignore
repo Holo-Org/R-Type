@@ -1,0 +1,22 @@
+# Cargo build output (the default location; the POC's own builds point
+# CARGO_TARGET_DIR elsewhere, but a plain `cargo build` lands here)
+target/
+
+# Toolchain and package caches, should RUSTUP_HOME or CARGO_HOME ever point here
+.rustup/
+.cargo-home/
+
+# rustfmt backups, profiling and coverage output
+**/*.rs.bk
+*.profraw
+*.profdata
+
+# Editors and language servers
+.vscode/
+.idea/
+.zed/
+
+# Program output
+*.log
+*.exe
+*.pdb

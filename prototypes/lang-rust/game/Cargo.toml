@@ -1,0 +1,15 @@
+[package]
+name = "game"
+description = "R-Type's messages and Match rules, on top of the Engine's headless part."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Headless: the Server links this crate, so it may not reach the client Engine
+# or raylib (deny.toml checks that no dependency brings them in).
+[dependencies]
+engine-headless.workspace = true
+
+[lints]
+workspace = true

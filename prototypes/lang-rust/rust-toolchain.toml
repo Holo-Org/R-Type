@@ -1,0 +1,6 @@
+# rustup reads this file and installs, then uses, exactly this toolchain for
+# every cargo command run under this directory.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

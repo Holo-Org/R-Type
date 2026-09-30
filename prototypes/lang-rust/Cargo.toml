@@ -1,0 +1,41 @@
+# R-Type language POC, Rust edition: see README.md to build and run, REPORT.md
+# for the findings.
+#
+# ADR 0001 in Cargo terms: a crate can only use the crates it lists under
+# [dependencies], and the dependency graph cannot have cycles. The arrows are:
+#
+#   engine-headless  <-  game  <-  r-type-server
+#         ^               ^
+#   engine-client (raylib, private)  <-  r-type-client
+#
+# deny.toml adds what Cargo alone does not check: raylib may only be a
+# dependency of engine-client, engine-client only of the Client program, and
+# game only of the two programs, so no Engine crate and no headless crate can
+# ever reach raylib or the Game.
+[workspace]
+resolver = "3"
+members = [
+    "engine/headless",
+    "engine/client",
+    "game",
+    "server",
+    "client",
+    "tests",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+# Only saves repeating the paths: each crate still has to list what it uses.
+[workspace.dependencies]
+engine-headless = { path = "engine/headless" }
+engine-client = { path = "engine/client" }
+game = { path = "game" }
+
+[workspace.lints.rust]
+# No `unsafe` anywhere in our own code. The fuzz test's counting allocator is
+# the one exception, and tests/Cargo.toml relaxes this for it alone.
+unsafe_code = "forbid"

@@ -1,0 +1,30 @@
+# ADR 0001, checked by cargo-deny (https://github.com/EmbarkStudios/cargo-deny):
+#
+#   cargo deny check bans
+#
+# Cargo already refuses code that uses a crate its package does not list, and
+# dependency cycles. It accepts any other dependency, though, even a wrong one
+# such as the Server listing engine-client. These bans refuse those: each
+# crate below may only be a direct dependency of its "wrappers".
+[bans]
+# Only the dependency rules below matter to this POC.
+multiple-versions = "allow"
+# Our crates depend on each other by path, without a version: fine, since
+# none of them is published.
+allow-wildcard-paths = true
+deny = [
+    { crate = "raylib", wrappers = [
+        "engine-client",
+    ], reason = "raylib stays behind the Engine's client part (ADR 0001)" },
+    { crate = "raylib-sys", wrappers = [
+        "raylib",
+    ], reason = "raylib stays behind the Engine's client part (ADR 0001)" },
+    { crate = "engine-client", wrappers = [
+        "r-type-client",
+    ], reason = "only the Client program draws: the Server and the Game stay headless (ADR 0001)" },
+    { crate = "game", wrappers = [
+        "r-type-server",
+        "r-type-client",
+        "protocol-fuzz",
+    ], reason = "the Engine knows nothing about the Game (ADR 0001)" },
+]

@@ -1,0 +1,21 @@
+[package]
+name = "r-type-client"
+description = "r-type_client: shows the Match and sends the Player's inputs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "r-type_client"
+path = "src/main.rs"
+
+# raylib is reached only through engine-client: listing it here to use it
+# directly is refused by deny.toml.
+[dependencies]
+engine-client.workspace = true
+engine-headless.workspace = true
+game.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "r-type-server"
+description = "r-type_server: runs one Match for up to four Players, headless."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "r-type_server"
+path = "src/main.rs"
+
+# Headless: the Engine's client part and raylib are not listed, so this
+# program can neither name them nor link them (deny.toml keeps them out of
+# its dependencies too).
+[dependencies]
+engine-headless.workspace = true
+game.workspace = true
+
+[lints]
+workspace = true

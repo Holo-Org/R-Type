@@ -1,0 +1,18 @@
+[package]
+name = "engine-client"
+description = "The Engine's client part: window, drawing, input and sound, over raylib."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# raylib is this crate's own business: its public API names none of raylib's
+# types, and a crate that depends on this one cannot `use raylib` without
+# listing raylib itself (which deny.toml refuses). The raylib crate builds
+# raylib 6.0 from its bundled sources with CMake, and generates its bindings
+# with bindgen, which needs libclang.
+[dependencies]
+raylib = "6.0.0"
+
+[lints]
+workspace = true

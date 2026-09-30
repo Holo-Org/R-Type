@@ -1,0 +1,24 @@
+[package]
+name = "protocol-fuzz"
+description = "Throws random and mutated datagrams at the Game's protocol decoder."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# A plain program rather than a libtest test (harness = false): it runs on one
+# thread, so the allocation counter only sees the decoder, and it takes
+# arguments: cargo test -p protocol-fuzz -- <datagrams> <seed>
+[[test]]
+name = "protocol_fuzz"
+path = "protocol_fuzz.rs"
+harness = false
+
+[dev-dependencies]
+engine-headless.workspace = true
+game.workspace = true
+
+# The workspace forbids `unsafe`; this package only denies it, so that the
+# counting allocator, which cannot be written without it, can opt out.
+[lints.rust]
+unsafe_code = "deny"
