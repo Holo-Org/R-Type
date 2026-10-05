@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>R-Type language POCs</title>
+<style>
+/* Layout: a long technical comparison. Prose stays at reading width; every section is a table read across four language columns, each keyed by one small colour mark. */
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --ink: #161a21;
+  --muted: #586172;
+  --rule: #dde1e7;
+  --rule-strong: #b8bfca;
+  --code-bg: #eceff3;
+  --cpp: #3a6ea5;
+  --rust: #b4532a;
+  --zig: #a87508;
+  --odin: #23866f;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-data: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101318;
+    --surface: #171b22;
+    --surface-2: #1c2129;
+    --ink: #e6e9ef;
+    --muted: #9aa3b2;
+    --rule: #2a3039;
+    --rule-strong: #3d4551;
+    --code-bg: #222831;
+    --cpp: #8fb4dd;
+    --rust: #e39a75;
+    --zig: #e2b858;
+    --odin: #6cc8b2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101318;
+  --surface: #171b22;
+  --surface-2: #1c2129;
+  --ink: #e6e9ef;
+  --muted: #9aa3b2;
+  --rule: #2a3039;
+  --rule-strong: #3d4551;
+  --code-bg: #222831;
+  --cpp: #8fb4dd;
+  --rust: #e39a75;
+  --zig: #e2b858;
+  --odin: #6cc8b2;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 var(--font-body);
+}
+.page {
+  max-width: 76rem;
+  margin-inline: auto;
+  padding-inline: clamp(16px, 4vw, 40px);
+  padding-block: 40px 72px;
+  display: grid;
+  gap: 2.75rem;
+}
+.page > * { min-width: 0; }
+
+a { color: inherit; text-decoration-color: var(--rule-strong); text-underline-offset: 0.18em; }
+a:hover { text-decoration-color: currentColor; }
+a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+
+code, .data {
+  font-family: var(--font-data);
+  font-size: 0.86em;
+  font-variant-numeric: tabular-nums;
+}
+code { background: var(--code-bg); padding: 0.05em 0.3em; border-radius: 3px; }
+
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 4.2vw, 2.9rem); line-height: 1.1; letter-spacing: -0.02em; font-weight: 750; }
+h2 { font-size: 1.4rem; line-height: 1.25; letter-spacing: -0.01em; font-weight: 700; }
+h3 { font-size: 1rem; line-height: 1.3; font-weight: 650; }
+p { margin: 0; }
+
+.eyebrow {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.prose { max-width: 70ch; display: grid; gap: 0.75rem; }
+.lede { font-size: 1.08rem; color: var(--ink); }
+.note { font-size: 0.82rem; color: var(--muted); max-width: 90ch; display: grid; gap: 0.35rem; }
+.note p { margin: 0; }
+ul.plain { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.3rem; }
+
+/* Masthead */
+.masthead { display: grid; gap: 1rem; padding-bottom: 0.5rem; }
+.meta { display: flex; flex-wrap: wrap; gap: 0.4rem 1.25rem; font-size: 0.85rem; color: var(--muted); }
+.meta span { white-space: nowrap; }
+
+/* Contents */
+.toc { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding-block: 0.75rem; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem 1.1rem; font-size: 0.88rem; }
+
+/* Language key */
+.lang { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; font-weight: 650; }
+.lang::before {
+  content: "";
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 2px;
+  background: var(--c);
+  flex: none;
+}
+.lang--cpp { --c: var(--cpp); }
+.lang--rust { --c: var(--rust); }
+.lang--zig { --c: var(--zig); }
+.lang--odin { --c: var(--odin); }
+
+/* The four POCs */
+.roster { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+@media (min-width: 36rem) { .roster { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 64rem) { .roster { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.poc {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 1rem 1.1rem 1.1rem;
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+  min-width: 0;
+}
+.poc .lang { font-size: 1.05rem; }
+.poc dl { margin: 0; display: grid; gap: 0.55rem; font-size: 0.86rem; }
+.poc dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.poc dd { margin: 0.1rem 0 0; }
+.poc .report { font-size: 0.86rem; font-weight: 600; }
+
+/* Sections */
+.section { display: grid; gap: 1rem; border-top: 1px solid var(--rule); padding-top: 1.75rem; }
+.section > * { min-width: 0; }
+.section-head { display: grid; gap: 0.4rem; }
+
+/* Tables */
+.table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+table { border-collapse: collapse; width: 100%; min-width: 50rem; font-size: 0.86rem; }
+caption { text-align: left; padding: 0.7rem 0.85rem 0; font-size: 0.8rem; color: var(--muted); }
+th, td { padding: 0.6rem 0.85rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+tbody tr:last-child > * { border-bottom: 0; }
+thead th { background: var(--surface-2); font-weight: 650; border-bottom: 1px solid var(--rule-strong); }
+tbody th { font-weight: 600; width: 14rem; }
+td .sub { display: block; color: var(--muted); font-size: 0.92em; margin-top: 0.15rem; }
+td.num, th.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+td.num { white-space: nowrap; }
+tr.subtotal > * { border-top: 1px solid var(--rule-strong); font-weight: 650; }
+.na { color: var(--muted); }
+
+/* Hurt and pleasant */
+.verdicts { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+@media (min-width: 46rem) { .verdicts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.verdict {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 1rem 1.1rem 1.15rem;
+  display: grid;
+  gap: 0.8rem;
+  align-content: start;
+  min-width: 0;
+}
+.verdict h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.verdict-part { display: grid; gap: 0.4rem; }
+.verdict ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.3rem; font-size: 0.88rem; }
+.verdict blockquote {
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+
+.bytes { font-family: var(--font-data); font-size: 0.9rem; letter-spacing: 0.04em; background: var(--code-bg); padding: 0.15rem 0.45rem; border-radius: 4px; white-space: nowrap; }
+
+footer { border-top: 1px solid var(--rule); padding-top: 1.25rem; font-size: 0.82rem; color: var(--muted); display: grid; gap: 0.5rem; }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+<main class="page">
+
+<header class="masthead">
+  <p class="eyebrow">Comparative study · input</p>
+  <h1>R-Type language POCs</h1>
+  <div class="prose">
+    <p class="lede">The same slice of R-Type, built four times: in C++, Rust, Zig and Odin. Each POC has its own report. This page lines their measurements up, for the team and for the comparative study the evaluator must validate before any development in a language other than C++. Choosing the language is left to the team.</p>
+    <p>Every figure comes from the four reports, and every judgement marked <em>Assessment</em> is a report's own. Where a report quoted another POC's figure, the owner's report is the source used here.</p>
+  </div>
+  <div class="meta">
+    <span>Apple M5, 10 cores, 32 GB, macOS 26.5.2</span>
+    <span>Built and measured 2026-09-29 to 2026-10-05</span>
+    <span>Status: all four POCs done</span>
+    <span>Updated 2026-10-06</span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#pocs">The four POCs</a></li>
+    <li><a href="#slice">The slice</a></li>
+    <li><a href="#glance">At a glance</a></li>
+    <li><a href="#build-times">Build times</a></li>
+    <li><a href="#sizes">Binary sizes</a></li>
+    <li><a href="#lines">Lines of code</a></li>
+    <li><a href="#boundary">Engine/Game boundary</a></li>
+    <li><a href="#safety">Safety and the decoder</a></li>
+    <li><a href="#interop">Interoperability</a></li>
+    <li><a href="#windows">Windows</a></li>
+    <li><a href="#setup">Setup</a></li>
+    <li><a href="#packages">Packages</a></li>
+    <li><a href="#verdicts">What hurt, what was pleasant</a></li>
+    <li><a href="#gaps">Not verified</a></li>
+  </ol>
+</nav>
+
+<section class="section" id="pocs" aria-labelledby="pocs-title">
+  <div class="section-head">
+    <h2 id="pocs-title">The four POCs</h2>
+  </div>
+  <div class="roster">
+    <article class="poc">
+      <span class="lang lang--cpp">C++</span>
+      <dl>
+        <div><dt>Language and compiler</dt><dd>C++23 with modules and <code>import std</code>; LLVM clang 22.1.8 and libc++ from nixpkgs</dd></div>
+        <div><dt>Build and packages</dt><dd>xmake 3.1.1 with xrepo</dd></div>
+        <div><dt>raylib</dt><dd>6.0, built from source by xrepo</dd></div>
+        <div><dt>Networking</dt><dd>standalone Asio 1.36.0</dd></div>
+      </dl>
+      <a class="report" href="https://github.com/Holo-Org/R-Type/blob/poc/lang-cpp/prototypes/lang-cpp/REPORT.md">C++ report, branch <code>poc/lang-cpp</code></a>
+    </article>
+    <article class="poc">
+      <span class="lang lang--rust">Rust</span>
+      <dl>
+        <div><dt>Language and compiler</dt><dd>Rust 1.98.1, edition 2024, pinned by <code>rust-toolchain.toml</code></dd></div>
+        <div><dt>Build and packages</dt><dd>a Cargo workspace, plus cargo-deny for the layering</dd></div>
+        <div><dt>raylib</dt><dd>the <code>raylib</code> crate 6.0.0, which builds raylib with CMake and bindgen</dd></div>
+        <div><dt>Networking</dt><dd><code>std::net</code> and threads</dd></div>
+      </dl>
+      <a class="report" href="https://github.com/Holo-Org/R-Type/blob/poc/lang-rust/prototypes/lang-rust/REPORT.md">Rust report, branch <code>poc/lang-rust</code></a>
+    </article>
+    <article class="poc">
+      <span class="lang lang--zig">Zig</span>
+      <dl>
+        <div><dt>Language and compiler</dt><dd>Zig 0.16.0 from nixpkgs</dd></div>
+        <div><dt>Build and packages</dt><dd><code>build.zig</code> and <code>build.zig.zon</code></dd></div>
+        <div><dt>raylib</dt><dd>raylib-zig, pinned to a <code>devel</code> commit, built by Zig</dd></div>
+        <div><dt>Networking</dt><dd><code>std.Io</code>, threaded implementation</dd></div>
+      </dl>
+      <a class="report" href="https://github.com/Holo-Org/R-Type/blob/poc/lang-zig/prototypes/lang-zig/REPORT.md">Zig report, branch <code>poc/lang-zig</code></a>
+    </article>
+    <article class="poc">
+      <span class="lang lang--odin">Odin</span>
+      <dl>
+        <div><dt>Language and compiler</dt><dd>Odin dev-2026-09: nixpkgs' compiler (LLVM 21.1.8), with <code>ODIN_ROOT</code> on the upstream tag</dd></div>
+        <div><dt>Build and packages</dt><dd>no build system: a bash script and <code>odin.lock</code></dd></div>
+        <div><dt>raylib</dt><dd><code>vendor:raylib</code> 6.0, prebuilt in the compiler's vendor collection</dd></div>
+        <div><dt>Networking</dt><dd><code>core:net</code> and <code>core:thread</code></dd></div>
+      </dl>
+      <a class="report" href="https://github.com/Holo-Org/R-Type/blob/poc/lang-odin/prototypes/lang-odin/REPORT.md">Odin report, branch <code>poc/lang-odin</code></a>
+    </article>
+  </div>
+  <div class="note">
+    <p>nixpkgs' Odin package deletes the vendor collection's prebuilt raylib libraries, so the Odin POC took its <code>base</code>, <code>core</code> and <code>vendor</code> collections from a checkout of the <code>dev-2026-09</code> tag. The official archive, built with LLVM 20, was not measured. dev-2026-10 was not out when the POC ran; the fixes on master after dev-2026-09 are listed in its report.</p>
+  </div>
+</section>
+
+<section class="section" id="slice" aria-labelledby="slice-title">
+  <div class="section-head">
+    <h2 id="slice-title">The slice every POC built</h2>
+  </div>
+  <div class="prose">
+    <p>The spec is in <a href="language-pocs.md">language-pocs.md</a>, and the layout follows ADR 0001: a thin Engine with a headless part and a client part, the Game on top, and a Server that must not link raylib.</p>
+    <ul class="plain">
+      <li><strong>Engine, headless:</strong> a little-endian byte writer and checked reader, a UDP transport with a network thread and a bounded inbox of 256 datagrams, a fixed-step clock.</li>
+      <li><strong>Engine, client:</strong> window, drawing, textures, input, sounds from PCM samples and screenshots, over raylib 6.0.</li>
+      <li><strong>Game:</strong> seven messages with their encoder and decoder, and the Match rules: up to 4 Players, Ship movement within 1280×720, a Player silent for 3 s dropped.</li>
+      <li><strong>Server and Client:</strong> a headless 60 Hz Tick loop; a Client with a three-layer Star-field, four Ships from the provided sprite sheet, scripted input and a generated "pew".</li>
+      <li><strong>Fuzz test:</strong> 10,000 round trips, then random and mutated datagrams, run with <code>100000 42</code>.</li>
+    </ul>
+    <p>Every datagram is an 8-byte header (protocol id "RT", version, message type, sequence) and a body, all little-endian. In all four, an Accept for Player 2 with sequence 0x01020304 is <span class="bytes">52 54 01 02 04 03 02 01 02</span>.</p>
+  </div>
+</section>
+
+<section class="section" id="glance" aria-labelledby="glance-title">
+  <div class="section-head">
+    <h2 id="glance-title">At a glance</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Cold build, downloads included</th><td class="num">29–35 s</td><td class="num">12.2–13.5 s</td><td class="num">33.1–33.2 s<span class="sub">203–411 s on a slow connection</span></td><td class="num">4.1–4.6 s<span class="sub">nothing to download</span></td></tr>
+        <tr><th scope="row">Rebuild after a Game implementation edit, release</th><td class="num">0.47–0.50 s</td><td class="num">0.43–0.47 s</td><td class="num">5.39–5.41 s</td><td class="num">4.15–4.19 s</td></tr>
+        <tr><th scope="row">Rebuild after a public Game type edit, release</th><td class="num">1.59–1.60 s</td><td class="num">0.44–0.46 s</td><td class="num">5.41–6.46 s</td><td class="num">4.11–4.19 s</td></tr>
+        <tr><th scope="row">Rebuild after an implementation edit, debug</th><td class="na">not measured</td><td class="num">0.29–0.30 s</td><td class="num">1.50–1.52 s</td><td class="num">1.56–1.64 s</td></tr>
+        <tr><th scope="row">No-op build</th><td class="num">0.21 s</td><td class="num">0.05 s</td><td class="num">0.23 s</td><td class="num">4.10–4.22 s<span class="sub">no build cache</span></td></tr>
+        <tr><th scope="row">Server, stripped, macOS</th><td class="num">204,712 B<span class="sub">plus libc++ from the Nix store</span></td><td class="num">414,312 B</td><td class="num">402,328 B</td><td class="num">234,728 B</td></tr>
+        <tr><th scope="row">Client, stripped, macOS</th><td class="num">745,208 B</td><td class="num">1,074,600 B</td><td class="num">1,058,600 B</td><td class="num">1,479,192 B</td></tr>
+        <tr><th scope="row">Windows <code>.exe</code> from the Mac</th><td>yes, with MinGW-w64 and three fixes</td><td>yes, with MinGW-w64 and four steps</td><td>yes, one flag, first try</td><td>no: the Client needs MSVC's runtime</td></tr>
+        <tr><th scope="row">Native Windows toolchain</th><td>Visual Studio 2022 17.10+</td><td>Visual Studio build tools, CMake, LLVM</td><td>the Zig archive alone</td><td>the Odin archive, MSVC, Windows SDK</td></tr>
+        <tr><th scope="row">Layering violations caught</th><td>7 of 7; case 8 cannot occur</td><td>9 of 10; case 8 not caught</td><td>13 of 13</td><td>16 of 16</td></tr>
+        <tr><th scope="row">What enforces the layering</th><td>xmake targets and modules, plus 19 lines of Lua</td><td>Cargo, plus 19 lines of <code>deny.toml</code> run by cargo-deny</td><td>module imports, plus 32 lines of <code>build.zig</code> and an 83-line API check</td><td>a 247-line checker written in Odin</td></tr>
+        <tr><th scope="row">Allocations in the decoder</th><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+        <tr><th scope="row">Code lines: Engine, Game, programs</th><td class="num">1,205</td><td class="num">1,342</td><td class="num">1,181</td><td class="num">1,265</td></tr>
+        <tr><th scope="row">Packages count for the subject</th><td>yes: xmake integrates xrepo</td><td>yes: Cargo</td><td>yes: <code>build.zig.zon</code></td><td>only with version management of <code>vendor:</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p>Release builds are C++ <code>-O3</code>, Rust release, Zig ReleaseSafe and Odin <code>-o:speed</code>, the last two with bounds checks on. Sizes for C++ are smaller partly because libc++ is loaded dynamically. The layering cases are numbered as in the Rust report; case 8 is a raylib type exposed by the client Engine's public API. Code lines exclude unit tests, fuzz tests and build files (tokei 15.0.0).</p>
+  </div>
+</section>
+
+<section class="section" id="build-times" aria-labelledby="build-title">
+  <div class="section-head">
+    <h2 id="build-title">Build times</h2>
+    <div class="prose"><p>Wall-clock times of each POC's default build, which makes both programs and the fuzz test, with <code>PATH</code> stripped of the user's own tools. Ranges span the runs each report gives.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Build</th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Cold, from nothing</th><td class="num">24.6 s + 4.8 s<br>30.4 s + 4.7 s<span class="sub">packages, then project</span></td><td class="num">12.24–13.53 s</td><td class="num">33.06–33.23 s<span class="sub">203–411 s on 2026-09-30, slow connection</span></td><td class="num">4.07–4.55 s</td></tr>
+        <tr><th scope="row">Downloads alone</th><td class="na">not timed apart</td><td class="num">0.98 s<span class="sub">36 crates</span></td><td class="num">10.09–12.49 s<span class="sub">7 packages, 87.4 MB</span></td><td class="na">none</td></tr>
+        <tr><th scope="row">Clean, dependencies downloaded</th><td class="num">1.6 s + 5.1–5.4 s<span class="sub">configure, build; packages stay built</span></td><td class="num">10.80–11.58 s<span class="sub">raylib rebuilt</span></td><td class="num">15.46–16.37 s<span class="sub">raylib rebuilt</span></td><td class="num">4.07–4.55 s<span class="sub">the same build</span></td></tr>
+        <tr><th scope="row">Our code only</th><td class="na">the clean build above</td><td class="num">0.51–0.52 s</td><td class="num">5.37–5.54 s</td><td class="num">the same build</td></tr>
+        <tr><th scope="row">Implementation edit</th><td class="num">0.47–0.50 s</td><td class="num">0.43–0.47 s</td><td class="num">5.39–5.41 s</td><td class="num">4.15–4.19 s</td></tr>
+        <tr><th scope="row">Public type edit</th><td class="num">1.59–1.60 s</td><td class="num">0.44–0.46 s</td><td class="num">5.41–6.46 s</td><td class="num">4.11–4.19 s</td></tr>
+        <tr><th scope="row">No-op</th><td class="num">0.21 s</td><td class="num">0.05 s</td><td class="num">0.229–0.230 s</td><td class="num">4.10–4.22 s</td></tr>
+        <tr><th scope="row">Debug, clean</th><td class="na">not measured</td><td class="num">9.05 s</td><td class="num">7.26–7.40 s</td><td class="num">1.64–1.69 s</td></tr>
+        <tr><th scope="row">Debug, implementation edit</th><td class="na">not measured</td><td class="num">0.29–0.30 s</td><td class="num">1.50–1.52 s</td><td class="num">1.56–1.64 s</td></tr>
+        <tr><th scope="row">Debug, public type edit</th><td class="na">not measured</td><td class="num">0.32–0.33 s</td><td class="num">1.51–1.68 s</td><td class="num">1.56–1.63 s</td></tr>
+        <tr><th scope="row">Debug, no-op</th><td class="na">not measured</td><td class="num">0.06 s</td><td class="num">0.222–0.223 s</td><td class="num">1.50–1.63 s</td></tr>
+        <tr><th scope="row">Windows cross-build, clean</th><td class="num">1.5 s + 7.6 s<span class="sub">packages built</span></td><td class="num">19.22 s</td><td class="num">15.93–16.14 s<span class="sub">23.5–29.2 s the first time</span></td><td class="na">not possible</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p><strong>What the edits were.</strong> C++: <code>game/match.cpp</code>, then the module interface <code>game/protocol.cppm</code>. Rust: a spawn position in <code>game/src/rules.rs</code>, then a derive on <code>ShipState</code>. Zig: a spawn position in <code>game/match.zig</code>, then methods and a constant on <code>ShipState</code>. Odin: the spawn x in <code>game/match.odin</code>, then a field on <code>Ship_State</code>.</p>
+    <p><strong>Why the edit costs differ.</strong> C++ recompiles one unit, or every importer of a changed interface. Rust recompiles the edited crate and its dependents. Zig compiles each program as one unit, with incremental compilation still experimental in 0.16.0. Odin keeps no cache at all, so every build is a full build; an internal, undocumented <code>-internal-cached</code> flag cut an unchanged Client rebuild to 0.07 s.</p>
+    <p><strong>Debug on Apple Silicon.</strong> Zig 0.16's fast Debug backend is x86-64 only, so Zig's Debug times here go through LLVM; a teammate on an x86-64 machine would see different figures, not measured.</p>
+  </div>
+</section>
+
+<section class="section" id="sizes" aria-labelledby="sizes-title">
+  <div class="section-head">
+    <h2 id="sizes-title">Binary sizes</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Binary, as built / stripped</th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row"><code>r-type_server</code>, macOS</th><td class="num">204,672 / 204,712 B</td><td class="num">536,144 / 414,312 B</td><td class="num">475,840 / 402,328 B</td><td class="num">243,488 / 234,728 B</td></tr>
+        <tr><th scope="row"><code>r-type_client</code>, macOS</th><td class="num">807,616 / 745,208 B</td><td class="num">1,294,496 / 1,074,600 B</td><td class="num">1,274,256 / 1,058,600 B</td><td class="num">1,733,616 / 1,479,192 B</td></tr>
+        <tr><th scope="row"><code>r-type_server.exe</code></th><td class="num">1,400,320 / 1,400,320 B</td><td class="num">1,279,791 / 906,752 B</td><td class="num">860,672 / 860,672 B</td><td class="num">420,352 B<span class="sub">linked by hand, not stripped</span></td></tr>
+        <tr><th scope="row"><code>r-type_client.exe</code></th><td class="num">3,226,112 / 3,226,112 B</td><td class="num">4,702,050 / 3,290,624 B</td><td class="num">2,841,600 / 2,841,600 B</td><td class="na">could not be linked</td></tr>
+        <tr><th scope="row">Server linked dynamically, macOS</th><td><code>libSystem</code> and libc++ from a Nix store path</td><td><code>libSystem</code></td><td><code>libSystem</code></td><td><code>libSystem</code></td></tr>
+        <tr><th scope="row">Server's Windows imports</th><td>KERNEL32, WS2_32, msvcrt, ntdll</td><td>KERNEL32, ntdll, msvcrt, WS2_32, USERENV, bcryptprimitives, one api-ms-win DLL</td><td>ntdll, KERNEL32</td><td>bcrypt, KERNEL32, msvcrt, ntdll, WS2_32</td></tr>
+        <tr><th scope="row">Smallest variant measured, Server / Client, stripped</th><td class="na">none</td><td class="num">336,592 / 992,208 B<span class="sub">LTO, one codegen unit, abort on panic</span></td><td class="num">154,344 / 613,384 B<span class="sub">ReleaseSmall, no safety checks</span></td><td class="num">218,248 / 1,462,744 B<span class="sub"><code>-o:size</code>, bounds checks on</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p>Every Client links raylib statically and loads the system's graphics frameworks. The Windows <code>.exe</code> files were never run: no Windows machine was available.</p>
+    <p><strong>Minimum macOS version.</strong> The Rust binaries declare macOS 11.0, but the <code>cc</code> crate compiled raylib's C code for 26.5. Zig's native builds declare the build machine's version, 26.5.2. Odin's depend on the linker: 14.0 with nixpkgs' clang, 26.0 with Apple's, or whatever <code>-minimum-os-version</code> asks for. The C++ report does not say.</p>
+  </div>
+</section>
+
+<section class="section" id="lines" aria-labelledby="lines-title">
+  <div class="section-head">
+    <h2 id="lines-title">Lines of code</h2>
+    <div class="prose"><p>Code lines only, without comments or blank lines, counted by tokei 15.0.0. Unit tests are counted apart.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Part</th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Engine, headless</th><td class="num">207</td><td class="num">252<span class="sub">30 of them a random generator</span></td><td class="num">270<span class="sub">87 of them the compile-time codec</span></td><td class="num">258</td></tr>
+        <tr><th scope="row">Engine, client</th><td class="num">182</td><td class="num">198</td><td class="num">226<span class="sub">83 of them the API check</span></td><td class="num">197</td></tr>
+        <tr><th scope="row">Game</th><td class="num">363</td><td class="num">408</td><td class="num">266</td><td class="num">311</td></tr>
+        <tr><th scope="row">Server program</th><td class="num">139</td><td class="num">135</td><td class="num">114</td><td class="num">135</td></tr>
+        <tr><th scope="row">Client program</th><td class="num">314</td><td class="num">349</td><td class="num">305</td><td class="num">364</td></tr>
+        <tr class="subtotal"><th scope="row">Engine, Game and programs</th><td class="num">1,205</td><td class="num">1,342</td><td class="num">1,181</td><td class="num">1,265</td></tr>
+        <tr><th scope="row">Fuzz test</th><td class="num">128</td><td class="num">164</td><td class="num">222</td><td class="num">375<span class="sub">131 of them the C-library watch</span></td></tr>
+        <tr><th scope="row">Unit tests</th><td class="na">none</td><td class="num">223</td><td class="num">184</td><td class="num">301</td></tr>
+        <tr><th scope="row">Build description</th><td class="num">76<span class="sub"><code>xmake.lua</code>, with 19 lines of layering rules</span></td><td class="num">123<span class="sub">7 <code>Cargo.toml</code>, <code>deny.toml</code>, <code>rust-toolchain.toml</code></span></td><td class="num">130<span class="sub"><code>build.zig</code> 108, with a 32-line layering check; <code>build.zig.zon</code> 22</span></td><td class="num">68<span class="sub"><code>scripts/build.sh</code> 63, <code>odin.lock</code> 5</span></td></tr>
+        <tr><th scope="row">Layering checker, separate</th><td class="na">none</td><td class="na">none</td><td class="na">in the Engine, above</td><td class="num">247</td></tr>
+        <tr><th scope="row">Helper scripts</th><td class="num">14</td><td class="num">18</td><td class="num">0</td><td class="num">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section" id="boundary" aria-labelledby="boundary-title">
+  <div class="section-head">
+    <h2 id="boundary-title">The Engine/Game boundary (ADR 0001)</h2>
+    <div class="prose"><p>Each POC tried the same kinds of violation on a scratch copy: Engine code using the Game, the Server using the client Engine or raylib, the Client program going around the Engine, and case 8, a raylib type exposed by the client Engine's public API.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">What the tools enforce alone</th><td>a target sees only the modules and packages of its dependencies; raylib and Asio are private to the Engine</td><td>a crate names only the crates it lists, and Cargo refuses cycles</td><td>a file imports only the modules <code>build.zig</code> gave its module, and no file outside the module's directory</td><td>import cycles; <code>@(private)</code> declarations; a program links only what its reachable code calls</td></tr>
+        <tr><th scope="row">What they let through</th><td>a target depending on any other target</td><td>a wrong but acyclic dependency; a public signature naming a dependency's type</td><td>any declared import, cycles included; public fields</td><td>any import of any directory or collection; public fields; public declarations naming raylib</td></tr>
+        <tr><th scope="row">The added check</th><td>two xmake rules, 19 lines of Lua</td><td><code>deny.toml</code>, 19 lines, checked by cargo-deny</td><td>32 lines in <code>build.zig</code> and an 83-line compile-time API check</td><td><code>scripts/check_layering</code>, 247 lines of Odin on the standard library's parser</td></tr>
+        <tr><th scope="row">When it runs</th><td>at configure time</td><td>a separate command, for CI or jj-ci</td><td>every build</td><td>every build, about 0.6 s</td></tr>
+        <tr><th scope="row">Violations tried</th><td class="num">7</td><td class="num">10</td><td class="num">13</td><td class="num">16</td></tr>
+        <tr><th scope="row">Caught</th><td>all 7: 4 by xmake's structure, 3 by the rules</td><td>9: 5 by rustc or Cargo, 4 only by cargo-deny</td><td>all 13: 5 by Zig, 8 by the added checks</td><td>all 16 by the checker; Odin alone stops 2, as import cycles</td></tr>
+        <tr><th scope="row">Case 8</th><td>cannot occur: raylib's header is included only by the implementation unit</td><td>not caught on stable Rust; the lint needs the unstable <code>public-dependency</code> feature</td><td>caught by the API check, which relies on raylib-zig's file names</td><td>caught by the checker, which reads syntax, not types</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p>In every POC the Server binary contains no raylib symbol and links only the system's C library (plus libc++ for C++).</p>
+    <p><em>Assessment</em>, from the reports: the Zig and Odin checks are the most complete, since they catch case 8, and also the most code to maintain; Cargo with cargo-deny is the cheapest for the dependency rules; C++ modules keep raylib's types out of the Engine's interface for free.</p>
+  </div>
+</section>
+
+<section class="section" id="safety" aria-labelledby="safety-title">
+  <div class="section-head">
+    <h2 id="safety-title">Safety and the decoder</h2>
+    <div class="prose"><p>The decoder faces hostile datagrams, and the subject requires that malformed packets never crash anything or exhaust memory.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Bounds checks</th><td>by discipline; nothing makes a check mandatory</td><td>always; an out-of-range index panics</td><td>in Debug and ReleaseSafe builds</td><td>in every build by default</td></tr>
+        <tr><th scope="row">Integer overflow</th><td>by discipline; UBSan available</td><td>checked in debug builds</td><td>checked in Debug and ReleaseSafe builds</td><td>never checked: arithmetic wraps by definition</td></tr>
+        <tr><th scope="row">How "no allocation" was measured</th><td>a replaced <code>operator new</code></td><td>a counting global allocator</td><td>intercepted <code>malloc</code> and <code>mmap</code>, and the decoder's object file</td><td>a counting allocator in the context, and intercepted <code>malloc</code> and <code>mmap</code></td></tr>
+        <tr><th scope="row">Datagrams fuzzed</th><td class="num">100,000<span class="sub">also under ASan and UBSan</span></td><td class="num">5,100,000</td><td class="num">5,100,000</td><td class="num">15,400,000</td></tr>
+        <tr><th scope="row">Result</th><td>no crash, 0 allocations, sanitizers silent</td><td>0 panics, 0 allocations</td><td>no panic, 0 allocations</td><td>no crash, 0 allocations</td></tr>
+        <tr><th scope="row">Sanitizers on this Mac</th><td>ASan and UBSan work with LLVM 22; LLVM 21's ASan hangs on macOS 26</td><td>nightly only</td><td>ThreadSanitizer builds crash at start</td><td>no usable ASan; ThreadSanitizer only with Apple's clang</td></tr>
+        <tr><th scope="row">A check removed on purpose</th><td class="na">not tried</td><td class="na">not tried</td><td>ReleaseSafe stops on the first datagram that needs it</td><td>the checked build stops on it; without bounds checks, memory is corrupted and the program crashes later</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <caption>Fuzz tallies with <code>100000 42</code>. Rust, Zig and Odin draw the same datagrams; C++ uses another generator, so only its proportions compare.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Outcome</th>
+          <th scope="col" class="num"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col" class="num"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col" class="num"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col" class="num"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Round trips, mismatches</th><td class="num">10,000, 0</td><td class="num">10,000, 0</td><td class="num">10,000, 0</td><td class="num">10,000, 0</td></tr>
+        <tr><th scope="row">Accepted</th><td class="num">6,403</td><td class="num">6,243</td><td class="num">6,243</td><td class="num">6,243</td></tr>
+        <tr><th scope="row">Too long</th><td class="num">10,024</td><td class="num">9,979</td><td class="num">9,979</td><td class="num">9,979</td></tr>
+        <tr><th scope="row">Truncated</th><td class="num">16,744</td><td class="num">16,719</td><td class="num">16,719</td><td class="num">16,719</td></tr>
+        <tr><th scope="row">Bad protocol id</th><td class="num">46,536</td><td class="num">46,610</td><td class="num">46,610</td><td class="num">46,610</td></tr>
+        <tr><th scope="row">Bad version</th><td class="num">3,150</td><td class="num">3,050</td><td class="num">3,050</td><td class="num">3,050</td></tr>
+        <tr><th scope="row">Unknown message type</th><td class="num">2,365</td><td class="num">2,346</td><td class="num">2,346</td><td class="num">2,346</td></tr>
+        <tr><th scope="row">Value out of range</th><td class="num">3,747</td><td class="num">3,690</td><td class="num">3,690</td><td class="num">3,690</td></tr>
+        <tr><th scope="row">Trailing bytes</th><td class="num">11,031</td><td class="num">11,363</td><td class="num">11,363</td><td class="num">11,363</td></tr>
+        <tr><th scope="row">Allocations in the decoder</th><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p>Identical tallies from three independent decoders fed the same datagrams are strong evidence that they classify datagrams alike; per-datagram agreement was not checked.</p>
+  </div>
+</section>
+
+<section class="section" id="interop" aria-labelledby="interop-title">
+  <div class="section-head">
+    <h2 id="interop-title">Interoperability</h2>
+  </div>
+  <div class="prose">
+    <p>Every POC played against the ones before it, in both directions: each Server with four Clients from each other language, and each language's Clients on the other Servers. No mismatch was found.</p>
+    <ul class="plain">
+      <li><strong>Server answers.</strong> To the same hand-made connect, all four Servers answer with the same 549 bytes (an accept, then 30 snapshots), identical under <code>cmp</code>, Tick numbers included.</li>
+      <li><strong>Client openings.</strong> What each Client sends first is identical across the four; capture windows caught two or three connects.</li>
+      <li><strong>Mixed Matches.</strong> One Match on the Zig Server mixed C++, Rust and Zig Clients; one on the Odin Server had a Client in each of the four languages.</li>
+      <li><strong>Timeouts.</strong> A Client killed with <code>kill -9</code> was dropped 3.03–3.08 s later in every pairing, and the others were told.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="section" id="windows" aria-labelledby="windows-title">
+  <div class="section-head">
+    <h2 id="windows-title">Windows</h2>
+    <div class="prose"><p>Each POC tried a time-boxed cross-build from the Mac without accepting any Microsoft licence. No <code>.exe</code> has been run yet, and no native Windows build was tried.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Cross-build from the Mac</th><td>works, with nixpkgs' MinGW-w64 GCC 15.3</td><td>works, with the <code>x86_64-pc-windows-gnu</code> target and MinGW-w64</td><td>works: <code>-Dtarget=x86_64-windows</code>, first try</td><td>does not link: Odin writes an object file and exits with status 0</td></tr>
+        <tr><th scope="row">What it took</th><td>mcfgthread's paths, linking <code>stdc++exp</code>, a workaround for a GCC crash</td><td>the target and linker, mcfgthread's paths, winpthreads, MinGW headers for bindgen</td><td>nothing</td><td>the Server links by hand with LLD and MinGW-w64; the Client cannot, since <code>vendor:raylib</code>'s Windows library needs MSVC's runtime</td></tr>
+        <tr><th scope="row">Native build needs</th><td>Visual Studio 2022 17.10 or later</td><td>Visual Studio build tools and a Windows SDK, CMake, LLVM for libclang</td><td>the Zig archive; its MinGW-w64 libraries replace Visual Studio</td><td>the Odin archive, plus MSVC and the Windows SDK</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p><em>Assessment</em>, from the Odin report: Odin's is the weakest Windows story of the four, where Zig cross-builds with one flag. Odin's master branch made <code>radlink</code> its default Windows linker after dev-2026-09 (PR #7739); whether that helps from macOS was not checked.</p>
+  </div>
+</section>
+
+<section class="section" id="setup" aria-labelledby="setup-title">
+  <div class="section-head">
+    <h2 id="setup-title">Setup from a clean machine</h2>
+    <div class="prose"><p>Only macOS was tested. The Linux and Windows steps come from each project's documentation.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">macOS, tested</th><td>xmake, and LLVM 22 from Nix with three environment variables, because Apple clang cannot <code>import std</code></td><td>Command Line Tools, rustup, CMake</td><td>the Zig archive, and the Command Line Tools for the Client's frameworks</td><td>the Odin archive and the Command Line Tools; nixpkgs' package does not work as packaged</td></tr>
+        <tr><th scope="row">Linux</th><td>GCC 15 or later, raylib's development packages</td><td>rustup, a C compiler, CMake, libclang, raylib's development packages</td><td>Zig, X11 development packages</td><td>the Odin archive, clang, X11's development library</td></tr>
+        <tr><th scope="row">Windows</th><td>Visual Studio 2022 17.10+, xmake</td><td>Visual Studio build tools, rustup, CMake, LLVM</td><td>the Zig archive</td><td>the Odin archive, MSVC, Windows SDK</td></tr>
+        <tr><th scope="row">First build downloads</th><td>xmake-repo, CMake, Ninja, Asio and raylib's sources</td><td>36 crates</td><td>7 packages, 87 MB</td><td>nothing beyond the archive, 62–149 MB</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p><em>Assessment</em>, from the reports: Rust's setup is lighter than C++'s on macOS. The Zig report calls Zig's the lightest of the first three, and the Odin report calls Odin's the lightest of the four on paper, one archive with nothing else to download. In practice Odin still needs the Command Line Tools on macOS and Visual Studio on Windows.</p>
+  </div>
+</section>
+
+<section class="section" id="packages" aria-labelledby="packages-title">
+  <div class="section-head">
+    <h2 id="packages-title">Packages and the evaluator's conditions</h2>
+    <div class="prose"><p>The evaluator counts a build system with an integrated package manager toward the subject's package-manager requirement. He counts Odin's <code>vendor:</code> collection only if the team manages its versions, meaning the packages in it are maintained and updated.</p></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col"><span class="lang lang--cpp">C++</span></th>
+          <th scope="col"><span class="lang lang--rust">Rust</span></th>
+          <th scope="col"><span class="lang lang--zig">Zig</span></th>
+          <th scope="col"><span class="lang lang--odin">Odin</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Mechanism</th><td>xrepo, xmake's package manager</td><td>Cargo and crates.io</td><td><code>build.zig.zon</code>: URLs pinned by content hash, no registry</td><td>none by design; <code>vendor:</code> ships with the compiler</td></tr>
+        <tr><th scope="row">What pins versions</th><td><code>xmake-requires.lock</code>: versions and the repository commit</td><td><code>Cargo.lock</code>, 45 packages, and <code>rust-toolchain.toml</code></td><td>content hashes; raylib-zig pinned to a <code>devel</code> commit, since it has no release for raylib 6.0</td><td>the POC's <code>odin.lock</code>: the release and commit, and the SHA-256 of raylib's libraries, checked before every build</td></tr>
+        <tr><th scope="row">Third-party code pulled in</th><td>raylib, Asio, and CMake and Ninja to build raylib</td><td>39 crates, all through the <code>raylib</code> binding</td><td>7 packages, some used only by web builds</td><td>none outside the compiler's archive</td></tr>
+        <tr><th scope="row">Caveats</th><td>xmake-repo's Asio is two releases behind upstream</td><td>the binding needs CMake and libclang on every machine</td><td>bindings track Zig releases, which break the standard library</td><td>raylib's version is the compiler's: raylib releases reached Odin after 16 to 74 days, and <code>vendor:ENet</code> links the system's ENet on macOS and Linux</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p><em>Assessment</em>, from the Odin report: the evaluator's condition can be met. A lock file, a check before every build and a compile-time assertion caught all four mismatches tried. They manage one version only, though: the team cannot take a raylib fix without a compiler upgrade, nor hold raylib back while upgrading Odin.</p>
+  </div>
+</section>
+
+<section class="section" id="verdicts" aria-labelledby="verdicts-title">
+  <div class="section-head">
+    <h2 id="verdicts-title">What hurt, what was pleasant</h2>
+    <div class="prose"><p>The main points of each report's two sections, shortened.</p></div>
+  </div>
+  <div class="verdicts">
+    <article class="verdict">
+      <span class="lang lang--cpp">C++</span>
+      <div class="verdict-part">
+        <h3>Hurt</h3>
+        <ul>
+          <li>Getting <code>import std</code> at all on macOS.</li>
+          <li>Toolchain defects found one after another: a GCC crash on a defaulted friend comparison, LLVM 21's AddressSanitizer hanging on macOS 26, a nondeterministic race between two xmake rules.</li>
+          <li>Editor support that needs clangd to match the compiler exactly.</li>
+          <li>Safety by discipline in the decoder.</li>
+        </ul>
+      </div>
+      <div class="verdict-part">
+        <h3>Pleasant</h3>
+        <ul>
+          <li>xrepo: one line per dependency, raylib built in 25–30 s from nothing, a lock file, working Windows cross-builds.</li>
+          <li>Modules as encapsulation: raylib and Asio appear in two implementation units only.</li>
+          <li>Modern C++ reads well: <code>std::expected</code>, <code>std::span</code>, <code>std::variant</code>, <code>std::println</code>.</li>
+        </ul>
+      </div>
+    </article>
+    <article class="verdict">
+      <span class="lang lang--rust">Rust</span>
+      <div class="verdict-part">
+        <h3>Hurt</h3>
+        <ul>
+          <li>Gaps in the <code>raylib</code> crate's safe API: three workarounds.</li>
+          <li>bindgen needs libclang on every machine; one binding brings 39 crates.</li>
+          <li>A macOS deployment-target mismatch between rustc and the <code>cc</code> crate.</li>
+        </ul>
+      </div>
+      <div class="verdict-part">
+        <h3>Pleasant</h3>
+        <ul>
+          <li>One command builds everything, with the compiler pinned in the repository.</li>
+          <li>Compile times: 0.5 s for our code, under half a second per edit.</li>
+          <li>The decoder's <code>?</code>, <code>enum</code> messages with exhaustive <code>match</code>, and a borrow checker that caught a real lifetime bug.</li>
+        </ul>
+        <blockquote><em>Assessment for the team:</em> the language is the part that has to be learned, not the build.</blockquote>
+      </div>
+    </article>
+    <article class="verdict">
+      <span class="lang lang--zig">Zig</span>
+      <div class="verdict-part">
+        <h3>Hurt</h3>
+        <ul>
+          <li>87 MB of downloads on a first build, up to 7 minutes on a slow connection.</li>
+          <li>Every edit rebuilds whole programs: 5.4 s in ReleaseSafe.</li>
+          <li>A young toolchain: a standard-library function that does not compile, a fuzzer broken in Debug, silent deprecations.</li>
+          <li>macOS binaries tied to the build machine's macOS version.</li>
+        </ul>
+      </div>
+      <div class="verdict-part">
+        <h3>Pleasant</h3>
+        <ul>
+          <li>Windows from the Mac with one flag.</li>
+          <li>One tool: no CMake, no libclang, not even <code>git</code>.</li>
+          <li>A compile-time codec with no per-message encoder or decoder, and <code>std.Io</code>'s cancellable network thread.</li>
+        </ul>
+        <blockquote><em>Assessment for the team:</em> a small language; what has to be learned is 0.16's new I/O, and Zig still breaks between releases.</blockquote>
+      </div>
+    </article>
+    <article class="verdict">
+      <span class="lang lang--odin">Odin</span>
+      <div class="verdict-part">
+        <h3>Hurt</h3>
+        <ul>
+          <li>No build cache: every build is a full 4.1–4.6 s build.</li>
+          <li>The boundary is ours to enforce: 247 lines of checker.</li>
+          <li>Windows: no cross-link, and Visual Studio for the native build.</li>
+          <li>Semantic surprises: a range's upper bound evaluated on every iteration, empty UDP datagrams never sent.</li>
+        </ul>
+      </div>
+      <div class="verdict-part">
+        <h3>Pleasant</h3>
+        <ul>
+          <li>Nothing to download or build but our code.</li>
+          <li><code>#packed</code> structs of <code>u16le</code> and <code>u32le</code> fields as the wire format, with <code>bit_set</code>, exhaustive <code>switch</code>es and <code>or_return</code>.</li>
+          <li>A parser in the standard library, built-in tests, and small binaries.</li>
+        </ul>
+        <blockquote><em>Assessment for the team:</em> a small language that reads like C with better types; the risks are Windows, the checker to maintain, monthly breaking releases, and <code>vendor:</code> moving only with the compiler.</blockquote>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="section" id="gaps" aria-labelledby="gaps-title">
+  <div class="section-head">
+    <h2 id="gaps-title">Not verified in any POC</h2>
+  </div>
+  <div class="prose">
+    <ul class="plain">
+      <li>Building on Linux, and building natively on Windows.</li>
+      <li>Running any Windows <code>.exe</code>.</li>
+      <li>Playing over a real network: every run used localhost.</li>
+      <li>Playing with the keyboard, and hearing the sound: every run was scripted.</li>
+      <li>Per-datagram agreement between the decoders.</li>
+      <li>Behaviour after very long runs, when Tick and sequence counters wrap.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>Sources: the <a href="https://github.com/Holo-Org/R-Type/blob/poc/lang-cpp/prototypes/lang-cpp/REPORT.md">C++</a>, <a href="https://github.com/Holo-Org/R-Type/blob/poc/lang-rust/prototypes/lang-rust/REPORT.md">Rust</a>, <a href="https://github.com/Holo-Org/R-Type/blob/poc/lang-zig/prototypes/lang-zig/REPORT.md">Zig</a> and <a href="https://github.com/Holo-Org/R-Type/blob/poc/lang-odin/prototypes/lang-odin/REPORT.md">Odin</a> reports, the spec in <a href="language-pocs.md">language-pocs.md</a>, and the sourced language notes in <a href="languages.md">languages.md</a>.</p>
+  <p>Each report also covers what this page leaves out: versions down to the patch, the setup steps, every violation's error message, and the improvements that need non-stable features.</p>
+</footer>
+
+</main>
+</body>
+</html>

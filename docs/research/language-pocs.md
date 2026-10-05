@@ -1,6 +1,6 @@
 # Language POCs
 
-Status: all four POCs done. Last updated: 2026-10-05.
+Status: all four POCs done, and compared side by side in [language-pocs-comparison.html](language-pocs-comparison.html). Last updated: 2026-10-06.
 
 One POC per language, run one at a time, in this order: C++, Rust, Zig, Odin. The evaluator has not ruled Odin out: he accepts its `vendor:` collection as a package manager only if we manage its versions. The Odin POC therefore has to show how that would work.
 
@@ -59,3 +59,5 @@ The same small slice of R-Type in every language, so that the differences come f
 | Rust | `poc-lang-rust` | done, report in `prototypes/lang-rust/REPORT.md` |
 | Zig | `poc-lang-zig` | done, report in `prototypes/lang-zig/REPORT.md` |
 | Odin | `poc-lang-odin` | done on dev-2026-09, report in `prototypes/lang-odin/REPORT.md`, version management of `vendor:` included |
+
+Each POC is pushed to its own branch, `poc/lang-<language>`, as two commits: the code, then the report.
