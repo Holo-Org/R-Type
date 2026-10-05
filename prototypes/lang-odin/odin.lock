@@ -1,0 +1,14 @@
+# The Odin release this project builds with, and what it uses from the
+# compiler's vendor collection. scripts/build.sh checks the release and the
+# raylib library before every build; engine/client/client.odin checks the
+# version of the raylib bindings at compile time. To move to another release,
+# follow "Upgrading Odin and vendor:raylib" in README.md.
+
+odin dev-2026-09 a2fb372b76e81ef31fbbc8a2cf2b4fdf5ac6c924
+
+# vendor:raylib 6.0 (raylib 6.0, released 2026-04-23), with miniaudio 0.11.24
+# compiled in. The SHA-256 of each prebuilt library, as Git LFS records it:
+vendor/raylib/macos/libraylib.a 0f1b656b22083ec666ae5401b1610025f8f0830f64e0ae6bd406e19fb48e838d
+vendor/raylib/linux/libraylib.a 1199fb5be52a663c099ed42eae5eabba83754ca9a8d7f82e1514ae4d6623874b
+vendor/raylib/linux-arm64/libraylib.a f35da654ad1f0223e833a76110d627659ab316a816dc770157c78bf18aeed65b
+vendor/raylib/windows/raylib.lib e979fda995ea6b4ac0162156c6bc5d44c1ef6d995941f648a4f05ee19f3e00cb

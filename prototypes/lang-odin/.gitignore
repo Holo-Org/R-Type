@@ -1,0 +1,33 @@
+# Build output: scripts/build.sh writes the programs to out/ by default
+# (ODIN_OUT moves it elsewhere)
+out/
+
+# What odin writes next to the sources when given no -out: or when asked to
+# keep its temporary files
+*.o
+*.obj
+*.ll
+*.bc
+*.dSYM/
+*.bin
+*.odin-doc
+.odin-cache/
+
+# Programs built in place, for example by `odin build server` run from here
+/r-type_server
+/r-type_client
+/protocol_fuzz
+/check_layering
+*.exe
+*.pdb
+*.lib
+*.exp
+
+# Editors and language servers
+.vscode/
+.idea/
+.zed/
+
+# Program output
+*.log
+shot*.png
