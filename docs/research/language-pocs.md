@@ -58,6 +58,6 @@ The same small slice of R-Type in every language, so that the differences come f
 | C++ | `poc-lang-cpp` | done, report in `prototypes/lang-cpp/REPORT.md` |
 | Rust | `poc-lang-rust` | done, report in `prototypes/lang-rust/REPORT.md` |
 | Zig | `poc-lang-zig` | done, report in `prototypes/lang-zig/REPORT.md` |
-| Odin | `poc-lang-odin` | done on dev-2026-09, report in `prototypes/lang-odin/REPORT.md`, version management of `vendor:` included |
+| Odin | `poc-lang-odin` | done on dev-2026-09, then moved to dev-2026-10; report in `prototypes/lang-odin/REPORT.md`, version management of `vendor:` included |
 
 Each POC is pushed to its own branch, `poc/lang-<language>`, as two commits: the code, then the report.

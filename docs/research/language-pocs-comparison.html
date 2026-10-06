@@ -281,7 +281,7 @@ html { scroll-behavior: smooth; }
     <article class="poc">
       <span class="lang lang--odin">Odin</span>
       <dl>
-        <div><dt>Language and compiler</dt><dd>Odin dev-2026-09: nixpkgs' compiler (LLVM 21.1.8), with <code>ODIN_ROOT</code> on the upstream tag</dd></div>
+        <div><dt>Language and compiler</dt><dd>Odin dev-2026-10, measured on dev-2026-09: nixpkgs' compiler (LLVM 21.1.8), with <code>ODIN_ROOT</code> on the upstream tag</dd></div>
         <div><dt>Build and packages</dt><dd>no build system: a bash script and <code>odin.lock</code></dd></div>
         <div><dt>raylib</dt><dd><code>vendor:raylib</code> 6.0, prebuilt in the compiler's vendor collection</dd></div>
         <div><dt>Networking</dt><dd><code>core:net</code> and <code>core:thread</code></dd></div>
@@ -290,7 +290,7 @@ html { scroll-behavior: smooth; }
     </article>
   </div>
   <div class="note">
-    <p>nixpkgs' Odin package deletes the vendor collection's prebuilt raylib libraries, so the Odin POC took its <code>base</code>, <code>core</code> and <code>vendor</code> collections from a checkout of the <code>dev-2026-09</code> tag. The official archive, built with LLVM 20, was not measured. dev-2026-10 was not out when the POC ran; the fixes on master after dev-2026-09 are listed in its report.</p>
+    <p>nixpkgs' Odin package deletes the vendor collection's prebuilt raylib libraries, so the Odin POC took its <code>base</code>, <code>core</code> and <code>vendor</code> collections from a checkout of the <code>dev-2026-09</code> tag. The official archive, built with LLVM 20, was not measured. The POC ran on dev-2026-09 and moved to dev-2026-10 when it came out on 2026-10-06. The code built unchanged, the tests, fuzz tallies and Server bytes were identical, builds were about 4 % faster in release and 6 % in debug, and sizes moved by 0.1 % at most. The Odin figures on this page are from dev-2026-09.</p>
   </div>
 </section>
 
@@ -334,7 +334,7 @@ html { scroll-behavior: smooth; }
         <tr><th scope="row">No-op build</th><td class="num">0.21 s</td><td class="num">0.05 s</td><td class="num">0.23 s</td><td class="num">4.10–4.22 s<span class="sub">no build cache</span></td></tr>
         <tr><th scope="row">Server, stripped, macOS</th><td class="num">204,712 B<span class="sub">plus libc++ from the Nix store</span></td><td class="num">414,312 B</td><td class="num">402,328 B</td><td class="num">234,728 B</td></tr>
         <tr><th scope="row">Client, stripped, macOS</th><td class="num">745,208 B</td><td class="num">1,074,600 B</td><td class="num">1,058,600 B</td><td class="num">1,479,192 B</td></tr>
-        <tr><th scope="row">Windows <code>.exe</code> from the Mac</th><td>yes, with MinGW-w64 and three fixes</td><td>yes, with MinGW-w64 and four steps</td><td>yes, one flag, first try</td><td>no: the Client needs MSVC's runtime</td></tr>
+        <tr><th scope="row">Windows <code>.exe</code> from the Mac</th><td>yes, with MinGW-w64 and three fixes</td><td>yes, with MinGW-w64 and four steps</td><td>yes, one flag, first try</td><td>no: the Client needs MSVC's runtime, and cross-linking, experimental in dev-2026-10, needs a Windows SDK</td></tr>
         <tr><th scope="row">Native Windows toolchain</th><td>Visual Studio 2022 17.10+</td><td>Visual Studio build tools, CMake, LLVM</td><td>the Zig archive alone</td><td>the Odin archive, MSVC, Windows SDK</td></tr>
         <tr><th scope="row">Layering violations caught</th><td>7 of 7; case 8 cannot occur</td><td>9 of 10; case 8 not caught</td><td>13 of 13</td><td>16 of 16</td></tr>
         <tr><th scope="row">What enforces the layering</th><td>xmake targets and modules, plus 19 lines of Lua</td><td>Cargo, plus 19 lines of <code>deny.toml</code> run by cargo-deny</td><td>module imports, plus 32 lines of <code>build.zig</code> and an 83-line API check</td><td>a 247-line checker written in Odin</td></tr>
@@ -383,7 +383,7 @@ html { scroll-behavior: smooth; }
   </div>
   <div class="note">
     <p><strong>What the edits were.</strong> C++: <code>game/match.cpp</code>, then the module interface <code>game/protocol.cppm</code>. Rust: a spawn position in <code>game/src/rules.rs</code>, then a derive on <code>ShipState</code>. Zig: a spawn position in <code>game/match.zig</code>, then methods and a constant on <code>ShipState</code>. Odin: the spawn x in <code>game/match.odin</code>, then a field on <code>Ship_State</code>.</p>
-    <p><strong>Why the edit costs differ.</strong> C++ recompiles one unit, or every importer of a changed interface. Rust recompiles the edited crate and its dependents. Zig compiles each program as one unit, with incremental compilation still experimental in 0.16.0. Odin keeps no cache at all, so every build is a full build; an internal, undocumented <code>-internal-cached</code> flag cut an unchanged Client rebuild to 0.07 s.</p>
+    <p><strong>Why the edit costs differ.</strong> C++ recompiles one unit, or every importer of a changed interface. Rust recompiles the edited crate and its dependents. Zig compiles each program as one unit, with incremental compilation still experimental in 0.16.0. Odin keeps no cache at all, so every build is a full build; an internal, undocumented <code>-internal-cached</code> flag cut an unchanged Client rebuild to 0.07 s. Odin's figures are from dev-2026-09: on dev-2026-10 the same builds took about 4 % less in release and 6 % less in debug.</p>
     <p><strong>Debug on Apple Silicon.</strong> Zig 0.16's fast Debug backend is x86-64 only, so Zig's Debug times here go through LLVM; a teammate on an x86-64 machine would see different figures, not measured.</p>
   </div>
 </section>
@@ -577,14 +577,14 @@ html { scroll-behavior: smooth; }
         </tr>
       </thead>
       <tbody>
-        <tr><th scope="row">Cross-build from the Mac</th><td>works, with nixpkgs' MinGW-w64 GCC 15.3</td><td>works, with the <code>x86_64-pc-windows-gnu</code> target and MinGW-w64</td><td>works: <code>-Dtarget=x86_64-windows</code>, first try</td><td>does not link: Odin writes an object file and exits with status 0</td></tr>
+        <tr><th scope="row">Cross-build from the Mac</th><td>works, with nixpkgs' MinGW-w64 GCC 15.3</td><td>works, with the <code>x86_64-pc-windows-gnu</code> target and MinGW-w64</td><td>works: <code>-Dtarget=x86_64-windows</code>, first try</td><td>does not link: dev-2026-09 wrote an object file and exited with status 0; dev-2026-10's experimental cross-linking asks for a Windows SDK</td></tr>
         <tr><th scope="row">What it took</th><td>mcfgthread's paths, linking <code>stdc++exp</code>, a workaround for a GCC crash</td><td>the target and linker, mcfgthread's paths, winpthreads, MinGW headers for bindgen</td><td>nothing</td><td>the Server links by hand with LLD and MinGW-w64; the Client cannot, since <code>vendor:raylib</code>'s Windows library needs MSVC's runtime</td></tr>
         <tr><th scope="row">Native build needs</th><td>Visual Studio 2022 17.10 or later</td><td>Visual Studio build tools and a Windows SDK, CMake, LLVM for libclang</td><td>the Zig archive; its MinGW-w64 libraries replace Visual Studio</td><td>the Odin archive, plus MSVC and the Windows SDK</td></tr>
       </tbody>
     </table>
   </div>
   <div class="note">
-    <p><em>Assessment</em>, from the Odin report: Odin's is the weakest Windows story of the four, where Zig cross-builds with one flag. Odin's master branch made <code>radlink</code> its default Windows linker after dev-2026-09 (PR #7739); whether that helps from macOS was not checked.</p>
+    <p><em>Assessment</em>, from the Odin report: Odin's is the weakest Windows story of the four, where Zig cross-builds with one flag. dev-2026-10 made <code>radlink</code> Odin's default Windows linker (PR #7739) and added experimental cross-linking (PR #7654), which needs a Windows SDK. It was not tried, since getting an SDK means accepting Microsoft's licence.</p>
   </div>
 </section>
 
