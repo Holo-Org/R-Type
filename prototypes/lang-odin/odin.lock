@@ -4,7 +4,7 @@
 # version of the raylib bindings at compile time. To move to another release,
 # follow "Upgrading Odin and vendor:raylib" in README.md.
 
-odin dev-2026-09 a2fb372b76e81ef31fbbc8a2cf2b4fdf5ac6c924
+odin dev-2026-10 84bc3fc2100b0f7880a3af37f71bccdcda41c6f9
 
 # vendor:raylib 6.0 (raylib 6.0, released 2026-04-23), with miniaudio 0.11.24
 # compiled in. The SHA-256 of each prebuilt library, as Git LFS records it:

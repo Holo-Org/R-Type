@@ -1,6 +1,6 @@
 # Language POC report: Odin
 
-The fourth and last of the language POCs (C++, Rust, Zig, Odin) described in `docs/research/language-pocs.md`. Built and measured on 2026-10-05, in three sittings: 14:59–16:06, 16:16–17:16 and 22:21–22:41 CEST. The session limit stopped the work twice.
+The fourth and last of the language POCs (C++, Rust, Zig, Odin) described in `docs/research/language-pocs.md`. Built and measured on 2026-10-05, in three sittings: 14:59–16:06, 16:16–17:16 and 22:21–22:41 CEST. The session limit stopped the work twice. On 2026-10-06, once dev-2026-10 was released, the POC moved to it and was rechecked; see "Rechecked on dev-2026-10". Every other figure comes from dev-2026-09.
 
 The following were all redone between 22:23 and 22:35, on the final sources:
 - the build times and compile-model timings;
@@ -19,6 +19,10 @@ Judgement is marked **Assessment**. Everything else was measured here or comes f
   - It is a headless Server and a raylib Client, on an Engine split into the packages `engine/headless` and `engine/client`. `scripts/build.sh` builds them, since Odin has no build system.
   - Four scripted Clients play together. A killed Client is dropped 3.03 s after the kill and the others are told. Garbage datagrams are counted and ignored, and a fifth Client is refused.
   - The Odin Server plays with C++, Rust and Zig Clients, and Odin Clients play on all three other Servers. One Match mixed all four. Captured datagrams are identical (`cmp`).
+- **Moved to dev-2026-10 on 2026-10-06, with one line changed.**
+  - Only the release pinned in `odin.lock` moved: `vendor/raylib` is the same in both releases, and the code builds unchanged.
+  - The unit tests pass, and the fuzz tallies and the Server's bytes are identical.
+  - Builds are about 4 % faster in release and 6 % in debug, and sizes move by 0.1 % at most.
 - **The fuzz test draws the Rust and Zig POCs' datagrams draw for draw, and its tallies equal theirs exactly.**
   - With `100000 42`: 6,243 accepted, 46,610 bad protocol ids, and so on, identical in all four build modes.
   - Another 15,000,000 datagrams (seed 7) went through both the bounds-checked and the unchecked release builds. 0 allocations were counted, through Odin's context or from the C library, and nothing crashed.
@@ -36,7 +40,7 @@ Judgement is marked **Assessment**. Everything else was measured here or comes f
   - `scripts/check_layering` is built on the standard library's own Odin parser. It caught all 16 violations tried, including a public Engine declaration that exposes a raylib type (case 8, which nothing caught in the Rust POC). It costs about 0.6 s per build.
   - Odin links a library only if reachable code calls it. A Server that imports the client Engine without calling raylib still links `libSystem` alone.
 - **No Windows `.exe` from the Mac.**
-  - Odin writes an object file and exits with status 0 without linking.
+  - dev-2026-09 writes an object file and exits with status 0 without linking. dev-2026-10's experimental cross-linking stops at once without a Windows SDK, and getting one means accepting Microsoft's licence.
   - The Server linked by hand with LLD and MinGW-w64. The Client cannot link that way: `vendor:raylib`'s Windows library needs MSVC's runtime.
   - The native build needs Visual Studio's MSVC and Windows SDK. Nothing was run on Windows.
 - **What hurt:**
@@ -62,6 +66,7 @@ Judgement is marked **Assessment**. Everything else was measured here or comes f
 | Machine | Apple M5, 10 cores, 32 GB; macOS 26.5.2 (25F84) | |
 | Odin compiler | dev-2026-09 (tag `dev-2026-09`, commit `a2fb372b7`, released 2026-09-01), built by nixpkgs with LLVM 21.1.8 | nixpkgs `odin` |
 | Odin collections (`base`, `core`, `vendor`) | the same tag, checked out from GitHub; the Git LFS objects of `vendor/raylib/macos/libraylib.a` and `windows/raylib.lib` fetched and their SHA-256 checked against the LFS pointers | `ODIN_ROOT` pointed at the checkout |
+| Recheck on 2026-10-06 | dev-2026-10 (tag `dev-2026-10`, commit `84bc3fc21`, released 2026-10-06), built from the tag by nixpkgs' `odin` package with its source replaced (LLVM 21.1.8); `ODIN_ROOT` on a checkout of the same tag | `nix build` of an override of nixpkgs' `odin` |
 | raylib | 6.0 (`vendor:raylib`, `VERSION :: "6.0"`), prebuilt static library with miniaudio 0.11.24 inside | the Odin tag |
 | OLS | dev-2026-08 | nixpkgs `ols` |
 | Apple clang | 21.0.0 (clang-2100.1.1.101), Command Line Tools 26.6 | `/usr/bin`, for `xcrun` and two link tests |
@@ -73,6 +78,7 @@ Judgement is marked **Assessment**. Everything else was measured here or comes f
 - **Why the compiler came from nixpkgs and the collections from upstream.**
   - nixpkgs builds dev-2026-09 from the same tag, but deletes `vendor/raylib`'s prebuilt libraries and patches `raylib.odin` and `raygui.odin` to link `system:raylib` (`package.nix`, `system-raylib.patch`).
   - It leaves `vendor/raylib/rlgl/rlgl.odin` pointing at the deleted libraries.
+  - nixpkgs had no dev-2026-10 package yet on 2026-10-06. The recheck therefore built nixpkgs' `odin` with the new tag's source: its patches applied unchanged, and the build took 45 s.
 - **How the official archives are built.** Odin's nightly job builds them, with LLVM 20 on macOS (Homebrew `llvm@20`) and Linux (Alpine `llvm20`), per `.github/workflows/nightly.yml`. They were not downloaded or run.
 - **Isolation.**
   - Everything ran inside `nix shell nixpkgs#odin`, plus tokei, git-lfs or LLVM where needed.
@@ -123,7 +129,7 @@ There are 15 unit tests, 8 in `engine/headless` and 7 in `game`. They check:
 | A decoder with a range check removed | the checked build stops at the first datagram that needs the check and prints it (exit 133). The unchecked build corrupts memory silently and crashes later (exit 139) |
 | Toolchain lock | a wrong pin, a wrong hash, nixpkgs' own `vendor/` and a wrong raylib version each stop the build; seven version strings tested against the pin |
 | Interoperability | both directions with C++, Rust and Zig, plus a mixed Match; captures identical (see below) |
-| Windows | `.obj` files from Odin; the Server `.exe` linked by hand, not run; the Client cannot link |
+| Windows | dev-2026-09: `.obj` files from Odin; the Server `.exe` linked by hand, not run; the Client cannot link. dev-2026-10: refuses without a Windows SDK |
 | Sanitizers | see "Sanitizers" |
 | OLS | go-to-definition across packages, with no configuration file |
 
@@ -131,10 +137,10 @@ As in the other POCs, the "pew" was generated and played on each fire without er
 
 ## Setup from a clean machine
 
-**What every platform needs: the release archive.** Sizes per the release's assets, published 2026-09-01:
-- 61.7 MB for `macos-arm64`, 65.5 MB for `macos-amd64`;
-- 70.0 MB for `linux-amd64`, 68.1 MB for `linux-arm64`;
-- 148.5 MB for `windows-amd64`.
+**What every platform needs: the release archive.** Sizes per dev-2026-10's assets, published 2026-10-06:
+- 62.0 MB for `macos-arm64`; dev-2026-10 no longer builds for Intel Macs (#7495);
+- 70.3 MB for `linux-amd64`, 68.3 MB for `linux-arm64`;
+- 149.4 MB for `windows-amd64`.
 
 The archive holds the compiler, `base`, `core` and `vendor`, with raylib's prebuilt libraries. A build downloads nothing and compiles only our code. Linking goes through the system's tools.
 
@@ -144,7 +150,7 @@ The archive holds the compiler, `base`, `core` and `vendor`, with raylib's prebu
    - If `xcrun` fails, the fallback writes the SDK path into a new local variable that shadows the real one (line 865). Odin then passes an empty `--sysroot`. So the Command Line Tools are required.
 2. Unpack the archive, put it on `PATH`, and run `bash scripts/build.sh`.
 
-**nixpkgs instead.** `nix shell nixpkgs#odin` works only with `ODIN_ROOT` pointing at a checkout of the tag, with raylib's LFS objects fetched. `scripts/build.sh` refuses nixpkgs' own root; the message is under "Version management".
+**nixpkgs instead.** `nix shell nixpkgs#odin` works only with `ODIN_ROOT` pointing at a checkout of the tag, with raylib's LFS objects fetched. `scripts/build.sh` refuses nixpkgs' own root; the message is under "Version management". Until nixpkgs carries dev-2026-10, its package has to be built from the new tag, as README.md shows.
 
 **Minimum macOS version.**
 - Odin passes `-mmacos-version-min` to the linker only when given `-minimum-os-version` (`src/linker.cpp`). Otherwise the linker's default applies:
@@ -544,11 +550,11 @@ The codec proper is 128 of those lines, plus `engine/headless/bytes.odin`'s 79. 
 
 The figures are under "Build times": whole-program compilation, no cache, one LLVM module per program in optimised builds, LLVM taking 86 % of the time.
 
-On master, after dev-2026-09:
-- PR #7701 multithreads the semantic checker (merged 2026-10-02). Type checking is 40 ms of 1.45 s here, so it would matter little at this size.
-- PRs #7720 and #7729 speed up the LLVM backend (merged 2026-10-03 and 2026-10-04). They target the 86 %.
+Released in dev-2026-10:
+- PR #7701 multithreads the semantic checker. Type checking is 40 ms of 1.45 s here, so it matters little at this size.
+- PRs #7720, #7729 and #7747 speed up the LLVM backend and the compiler. They target the 86 %.
 
-None of them was measured.
+Together they saved about 4 % per release build and 6 % per debug build here (see "Rechecked on dev-2026-10"). There is still no cache, so every edit still costs a full build.
 
 ### `core:net` for UDP, and stopping the network thread
 
@@ -612,7 +618,7 @@ The earlier POCs saw the same: in the C++ POC, LLVM 21's AddressSanitizer runtim
   - dev-2026-03 replaced `core:os` with the rewrite previously at `core:os/os2`, keeping the old package at `core:os/old` until Q3 2026. `core:os/old` is gone in dev-2026-09.
   - dev-2026-07 renamed `core:mem`'s `DEFAULT_PAGE_SIZE` to `PAGE_SIZE` and dropped LLVM 14.
   - dev-2026-09 removed an `os.Error == 0` compatibility hack, and the `inline` and `no_inline` keywords from `core:odin`.
-- **Master's fixes after dev-2026-09.** None of those the brief listed was hit: #7607, #7570, #7641, f04f867b2, #7652, #7668, #7656, #7685 and #7682.
+- **Fixes released in dev-2026-10.** None of those the brief listed was hit on dev-2026-09: #7607, #7570, #7641, f04f867b2, #7652, #7668, #7656, #7685 and #7682. All nine shipped in dev-2026-10.
   - #7682 fixes the `nocapture` attribute on LLVM 21 and later, which nixpkgs' build uses. The release uses LLVM 20.
   - #7685 rewrites parametric polymorphism, which the codec relies on.
 - **What I reached for from memory, and was wrong:**
@@ -628,8 +634,8 @@ The earlier POCs saw the same: in the C++ POC, LLVM 21's AddressSanitizer runtim
 - **No build cache.** Any edit costs a full build of every program: 4.1–4.6 s in release and 1.5–1.7 s in debug, against Rust's 0.44 s and 0.30 s. That is acceptable at this size, but it grows with the program.
 - **The boundary is ours to enforce:** 247 lines of checker, about 0.6 s per build.
 - **Windows:**
-  - no cross-link;
-  - an exit status that reports success;
+  - no cross-link without a Windows SDK, and so without accepting Microsoft's licence (dev-2026-10's cross-linking is experimental);
+  - with dev-2026-09, an exit status that reports success (dev-2026-10 fails properly);
   - a raylib library that needs MSVC;
   - Visual Studio's licence for the native build.
 - **Sanitizers on macOS:** neither works with nixpkgs' toolchain, and only ThreadSanitizer works with Apple's clang.
@@ -700,8 +706,9 @@ No mismatch was found. The Odin, Rust and Zig decoders were fuzzed against each 
 ## The Windows result
 
 **Cross-build from macOS: it does not link.**
-- `odin build server -target:windows_amd64` compiled `r-type_server.obj` (467,978 B). It then printed `Linking for cross compilation for this platform is not yet supported (windows amd64)` and exited with status 0.
+- With dev-2026-09, `odin build server -target:windows_amd64` compiled `r-type_server.obj` (467,978 B). It then printed `Linking for cross compilation for this platform is not yet supported (windows amd64)` and exited with status 0.
 - That exit status is issue #4821, open since 2025-02-10. Scripts and CI would take the failure for a success.
+- dev-2026-10 adds experimental cross-linking for Windows (#7654), with a new `-windows-sdk-root` option (#7788). Without it, the same command stops at once with `-windows-sdk-root:<path> must be used to target Windows` and exit status 1. No Windows SDK was obtained, since that means accepting Microsoft's licence, so the new path is untested.
 - **The Server, linked by hand:**
   - `ld.lld` (LLD 21.1.8), MinGW-w64 14.0.0's start files and libraries, `libgcc.a` for `___chkstk_ms`, and a one-line C file defining `_fltused`, which Odin's object references;
   - the result is `r-type_server.exe`, 420,352 B, x86-64 console;
@@ -717,30 +724,60 @@ No mismatch was found. The Odin, Rust and Zig decoders were fuzzed against each 
 - It needs the archive, plus MSVC and the Windows SDK. The install docs mention the developer command prompt only for building Odin itself from source.
 - README.md gives the commands, in Nushell.
 
-**What master changes.**
-- PR #7739, merged 2026-10-04 after dev-2026-09, makes `radlink` the default linker on Windows. `radlink` ships in the repository as `bin/radlink.exe`, a Windows program.
-- Whether it changes anything for linking from macOS was not checked.
+**What dev-2026-10 changes.**
+- PR #7739 makes `radlink` the default linker on Windows. `radlink` ships in the repository as `bin/radlink.exe`, a Windows program.
+- Cross-linking from macOS now exists, but it is experimental and needs a Windows SDK (above).
 
 **Assessment:** the weakest Windows story of the four POCs. Zig cross-builds with one flag, and Rust and C++ with MinGW. Odin needs a Windows machine with Visual Studio for the Client.
 
+## Rechecked on dev-2026-10
+
+dev-2026-10 was published on 2026-10-06, from commit `84bc3fc21`. The POC moved to it the same day, following "Upgrading Odin and vendor:raylib" in README.md, on a scratch copy first.
+
+- **The upgrade took one line.** `vendor/raylib` is identical in both tags (`git diff dev-2026-09 dev-2026-10 -- vendor/raylib` is empty), so the four raylib hashes in `odin.lock` stood. Only the `odin` line moved.
+- **The code builds unchanged** under `-vet -strict-style`, although the release rewrote parametric polymorphism and fixed a `-strict-style` rule. The 15 unit tests pass.
+- **Same behaviour.** With `100000 42`, the fuzz tallies are identical, with 0 allocations through the context and from the C library. The Server answers a hand-made connect with the same 549 bytes (`cmp`).
+- **Unchanged surprises:**
+  - `for _ in 0 ..< f()` still calls `f` before every iteration;
+  - `%7d` still pads with zeros, since the `fmt` change (#7724) is not in the release;
+  - `odin build -help` still documents no cache;
+  - the `xcrun` fallback still declares a second `darwin_sdk_path` (`src/linker.cpp`, now near line 1029).
+
+Both compilers built the same sources on 2026-10-06, alternately, with a load average of 3.2–4.4. Each time is a whole `bash scripts/build.sh`:
+
+| | dev-2026-09 | dev-2026-10 |
+| --- | --- | --- |
+| Release build | 4.097, 4.270, 4.292 s | 4.024, 4.031, 4.119 s |
+| Debug build | 1.498, 1.545, 1.655 s | 1.399, 1.510, 1.511 s |
+| `r-type_server`, as built / stripped | 243,488 / 234,736 B | 243,648 / 234,728 B |
+| `r-type_client`, as built / stripped | 1,733,616 / 1,479,200 B | 1,733,776 / 1,479,208 B |
+| `protocol_fuzz`, as built / stripped | 225,232 / 216,752 B | 225,360 / 216,728 B |
+
+The dev-2026-09 sizes differ from those under "Binary sizes" by a few bytes, since these builds ran from another directory.
+
+**Assessment:** at this size, the release's compile-time work saves about 0.16 s per release build (4 %) and 0.09 s per debug build (6 %), comparing means. LLVM's code generation still dominates, and there is still no cache. For `vendor:`, this first upgrade cost one line, because raylib did not move.
+
 ## Improvements that need non-stable features
 
-These exist only on master, or in dev-2026-09 behind an internal flag:
-- **A build cache.** `-internal-cached` (internal, undocumented) cut an unchanged Client rebuild from 0.51 s to 0.07 s.
-- **Faster compilation:** #7701, the multithreaded checker, merged 2026-10-02; #7720 and #7729, LLVM backend compile times, merged 2026-10-03 and 2026-10-04. Not measured.
-- **Windows linking:** #7739, radlink by default, merged 2026-10-04.
-- **Fixes:** the nine listed under "The churn".
+These exist in dev-2026-10 only behind an internal flag or as an experimental feature:
+- **A build cache.** `-internal-cached` (internal, and still absent from `odin build -help`) cut an unchanged Client rebuild from 0.51 s to 0.07 s on dev-2026-09.
+- **Windows cross-linking** (#7654, experimental): `.exe` files from the Mac, given a Windows SDK and, for the Client, MSVC's runtime libraries.
+
+dev-2026-10 released what this section listed for dev-2026-09: the multithreaded checker (#7701), the compile-time work (#7720, #7729, #7747), `radlink` as the default Windows linker (#7739), and the nine fixes under "The churn".
 
 dev-2026-09's experimental features, inline `asm` templates and `#+feature` opt-ins, were neither needed nor used.
 
 ## Not verified
 
 - **Other platforms:** building on Linux, building natively on Windows, and running the Windows `.exe`.
-- **The official release archive.** It was not downloaded. Its version string comes only from issue reports and the build scripts. Its LLVM 20 code generation, sizes and times are unmeasured. Every figure here comes from nixpkgs' LLVM 21.1.8 build of the same tag.
+- **The official release archives.** Neither release's archive was downloaded. Their version strings come only from issue reports and the build scripts. Their LLVM 20 code generation, sizes and times are unmeasured. Every figure here comes from nixpkgs' LLVM 21.1.8 builds of the tags.
 - **Use:** hearing the sound; playing with the keyboard (every run was scripted); a real network (every run used localhost).
 - **The other POCs' figures:** taken from their reports, not re-measured.
 - **Decoder agreement:** per-datagram agreement with the other decoders; the C++ decoder was not fuzzed against Odin's.
-- **Master:** none of the improvements above was measured.
+- **dev-2026-10 beyond the recheck:**
+  - the demo, the interoperability runs, the boundary cases and the sanitizers were not redone;
+  - the Client was built but not run;
+  - cross-linking for Windows with a Windows SDK was not tried.
 - **macOS:**
   - running a program on an older macOS;
   - why a freshly linked program's first run takes 0.27 s;

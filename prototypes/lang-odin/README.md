@@ -1,6 +1,6 @@
 # R-Type language POC: Odin
 
-The Odin version of the language POC described in `docs/research/language-pocs.md` (in the `research` workspace): a headless Server and a raylib Client for up to four Players, on a thin home-made Engine. Odin dev-2026-09, with raylib 6.0 from the compiler's `vendor:` collection, `core:net` and `core:thread`. Odin has no build system: `scripts/build.sh` is the build description.
+The Odin version of the language POC described in `docs/research/language-pocs.md` (in the `research` workspace): a headless Server and a raylib Client for up to four Players, on a thin home-made Engine. Odin dev-2026-10, with raylib 6.0 from the compiler's `vendor:` collection, `core:net` and `core:thread`. It was measured on dev-2026-09 and rechecked on dev-2026-10 (REPORT.md). Odin has no build system: `scripts/build.sh` is the build description.
 
 ![Four Clients connected to one Server](screenshot.png)
 
@@ -24,7 +24,7 @@ The message bodies are `#packed` structs of one-byte and little-endian fields (`
 
 ## Build
 
-Every platform needs the Odin release `odin.lock` names, dev-2026-09, from its [release page](https://github.com/odin-lang/Odin/releases/tag/dev-2026-09): `odin-macos-arm64-dev-2026-09.tar.gz` (62 MB), `odin-linux-amd64-dev-2026-09.tar.gz` (70 MB), `odin-windows-amd64-dev-2026-09.zip` (149 MB). The archive holds the compiler, the core library and the `vendor:` collection, raylib's prebuilt libraries included: there is nothing else to download and nothing to compile but our code. Unpack it and put its folder on `PATH`.
+Every platform needs the Odin release `odin.lock` names, dev-2026-10, from its [release page](https://github.com/odin-lang/Odin/releases/tag/dev-2026-10): `odin-macos-arm64-dev-2026-10.tar.gz` (62 MB), `odin-linux-amd64-dev-2026-10.tar.gz` (70 MB), `odin-windows-amd64-dev-2026-10.zip` (149 MB). The archive holds the compiler, the core library and the `vendor:` collection, raylib's prebuilt libraries included: there is nothing else to download and nothing to compile but our code. Unpack it and put its folder on `PATH`.
 
 ```nu
 bash scripts/build.sh
@@ -32,7 +32,7 @@ bash scripts/build.sh
 
 The programs land in `out/` (`ODIN_OUT` moves it). The script first checks that `odin version` is the pinned release and that raylib's library is the one `odin.lock` records, then checks the layering, then builds the Server, the Client and the fuzz test with `-o:speed` and Odin's bounds checks, under `-vet -strict-style`. `bash scripts/build.sh debug` builds without optimisation and with debug information, `size` optimises for size, and `unchecked` adds `-no-bounds-check`.
 
-There is no build cache: every build compiles everything, in 4.1–4.6 s on an Apple M5 (1.5–1.7 s in debug).
+There is no build cache: every build compiles everything, in 4.0–4.1 s on an Apple M5 with dev-2026-10 (1.4–1.5 s in debug).
 
 ### macOS
 
@@ -45,12 +45,13 @@ bash scripts/build.sh
 
 A program declares as its minimum the macOS version of the machine that linked it (26.0 here), unless `odin build` is given `-minimum-os-version:11.0` or another version: a build to hand to a teammate on an older Mac needs that flag.
 
-nixpkgs packages Odin too (`nix shell nixpkgs#odin`), but deletes the `vendor/raylib` libraries and makes `vendor:raylib` link a system raylib, so `scripts/build.sh` refuses it (`…/vendor/raylib/macos/libraylib.a is missing`). Its compiler works with the release's own collections, from a checkout of the `dev-2026-09` tag whose raylib libraries come from Git LFS (`nix shell nixpkgs#git-lfs` provides it):
+nixpkgs packages Odin too (`nix shell nixpkgs#odin`), but deletes the `vendor/raylib` libraries and makes `vendor:raylib` link a system raylib, so `scripts/build.sh` refuses it (`…/vendor/raylib/macos/libraylib.a is missing`). Its compiler works with the release's own collections, from a checkout of the `dev-2026-10` tag whose raylib libraries come from Git LFS (`nix shell nixpkgs#git-lfs` provides it). On 2026-10-06 nixpkgs still carried dev-2026-09, so the commands below build nixpkgs' package from the dev-2026-10 tag; once nixpkgs carries dev-2026-10, `nix shell nixpkgs#odin` replaces that step:
 
 ```nu
-git clone --branch dev-2026-09 --depth 1 https://github.com/odin-lang/Odin.git odin-dev-2026-09
-git -C odin-dev-2026-09 lfs pull --include "vendor/raylib/macos/libraylib.a"
-with-env { ODIN_ROOT: (pwd | path join odin-dev-2026-09) } { nix shell nixpkgs#odin --command bash scripts/build.sh }
+git clone --branch dev-2026-10 --depth 1 https://github.com/odin-lang/Odin.git odin-dev-2026-10
+git -C odin-dev-2026-10 lfs pull --include "vendor/raylib/macos/libraylib.a"
+let odin = (nix build --impure --no-link --print-out-paths --expr 'let pkgs = (builtins.getFlake "nixpkgs").legacyPackages.aarch64-darwin; in pkgs.odin.overrideAttrs (old: { version = "dev-2026-10"; src = pkgs.fetchFromGitHub { owner = "odin-lang"; repo = "Odin"; rev = "dev-2026-10"; hash = "sha256-Y8Em52W3ntWXgnRiRAyhWv5Y6+3b/4bj2+TTIvtniYU="; }; })' | str trim)
+with-env { ODIN_ROOT: (pwd | path join odin-dev-2026-10), PATH: ($env.PATH | prepend ($odin | path join bin)) } { bash scripts/build.sh }
 ```
 
 Its programs declare macOS 14.0 as their minimum, the default of nixpkgs' `clang`.
@@ -80,7 +81,7 @@ odin build tests/fuzz -o:speed -vet -strict-style -out:out/protocol_fuzz.exe
 
 ### Windows `.exe` files, cross-built on macOS
 
-Not supported: `odin build server -target:windows_amd64` writes `r-type_server.obj`, prints "Linking for cross compilation for this platform is not yet supported (windows amd64)" and exits with status 0 ([odin-lang/Odin#4821](https://github.com/odin-lang/Odin/issues/4821)). Linking that object by hand works for the Server, with LLD and MinGW-w64's runtime (the result was not run), but not for the Client: `vendor/raylib/windows/raylib.lib` was built by MSVC and needs its C runtime. Build on Windows.
+Not supported without a Windows SDK. dev-2026-10 adds experimental cross-linking for Windows ([odin-lang/Odin#7654](https://github.com/odin-lang/Odin/pull/7654)), and without an SDK `odin build server -target:windows_amd64` stops with "-windows-sdk-root:<path> must be used to target Windows". Getting the SDK means accepting Microsoft's licence, so it was not tried. Even with it, the Client needs MSVC's C runtime: `vendor/raylib/windows/raylib.lib` was built by MSVC. With dev-2026-09, Odin wrote `r-type_server.obj` and exited with status 0 ([odin-lang/Odin#4821](https://github.com/odin-lang/Odin/issues/4821)); linking that object by hand with LLD and MinGW-w64's runtime worked for the Server (the result was not run). Build on Windows.
 
 ## Run
 
@@ -137,11 +138,13 @@ for program in [server client tests/fuzz scripts/check_layering] { odin check $p
 
 A raylib update reaches `vendor:raylib` only with an Odin release. To move to a new release:
 
-1. Read its release notes and what changed in `vendor/raylib` since the pinned one, for example `git log dev-2026-09..dev-2026-10 -- vendor/raylib` in a clone of [odin-lang/Odin](https://github.com/odin-lang/Odin).
+1. Read its release notes and what changed in `vendor/raylib` since the pinned one, for example `git log dev-2026-10..dev-2026-11 -- vendor/raylib` in a clone of [odin-lang/Odin](https://github.com/odin-lang/Odin).
 2. Install the new release, then set its tag and commit on the `odin` line of `odin.lock`.
 3. Run `bash scripts/build.sh`. It stops if a raylib library changed, and `engine/client` stops the build if raylib's version changed.
 4. Record the new libraries' SHA-256 in `odin.lock` (`shasum -a 256`, or the oids `git lfs ls-files -l` prints in the clone), and, for a new raylib version, its version in `engine/client/client.odin` after reading raylib's changelog.
 5. Run the unit tests, the fuzz test and a Match, then commit the lock with the code it needed, on every platform's CI.
+
+Moving from dev-2026-09 to dev-2026-10 took one line: `vendor/raylib` did not change between the two tags, so only the `odin` line of `odin.lock` moved, and the code built unchanged.
 
 ## Editor support
 
