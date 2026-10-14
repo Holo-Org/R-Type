@@ -67,6 +67,14 @@ _Avoid_: keys, buttons, command
 Where every entity of a Match stands at one Tick, as the Server sends it to a Client; each Snapshot replaces the one before.
 _Avoid_: state update, world update, sync
 
+**Announcement**:
+Something that happened in a Match that every Player must learn of, such as a Player joining, leaving or timing out, an explosion, a Ship destroyed, or game over; unlike a Snapshot, it is delivered for certain.
+_Avoid_: event (kept for the Engine's internal messages), notification
+
+**Connection**:
+The link between one Client and the Server, from the moment the Server accepts the Client until the Client disconnects or times out.
+_Avoid_: session
+
 ### Time
 
 **Tick**:
