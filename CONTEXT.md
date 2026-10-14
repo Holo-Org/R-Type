@@ -53,6 +53,20 @@ _Avoid_: spawn group
 The scrolling space background of a Match.
 _Avoid_: background, parallax
 
+**Action**:
+Something a Player can ask their Ship to do (move up, down, left or right, or fire), whichever key or button they bound to it.
+_Avoid_: command, key, button
+
+### Between Client and Server
+
+**Input**:
+The Actions a Player holds during one Tick, as their Client sends them to the Server.
+_Avoid_: keys, buttons, command
+
+**Snapshot**:
+Where every entity of a Match stands at one Tick, as the Server sends it to a Client; each Snapshot replaces the one before.
+_Avoid_: state update, world update, sync
+
 ### Time
 
 **Tick**:
