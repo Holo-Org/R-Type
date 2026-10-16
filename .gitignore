@@ -1,0 +1,18 @@
+# zig build output and cache, written next to build.zig by default
+# (--prefix and --cache-dir, or ZIG_LOCAL_CACHE_DIR, move them elsewhere)
+zig-out/
+.zig-cache/
+
+# Packages that zig build and zig fetch unpack next to build.zig: Zig 0.16
+# always uses <build root>/zig-pkg, and no option or variable moves it
+zig-pkg/
+
+# Editors and language servers
+.vscode/
+.idea/
+.zed/
+
+# Program output
+*.log
+*.exe
+*.pdb
