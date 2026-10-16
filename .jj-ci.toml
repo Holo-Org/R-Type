@@ -1,0 +1,52 @@
+# R-Type's checks, declared once and run by jj-ci (https://github.com/renman-ymd/jj-ci):
+# - the "ci" stage on every pull request and every push to main, by
+#   .github/workflows/ci.yml;
+# - the "push" stage before `jj push` publishes, for those who use jj.
+#
+# No check has `paths`: they guard main, so they run on every change, docs
+# included, rather than guess what a change could have broken.
+#
+# The isolated copy jj-ci checks each revision out into holds tracked files
+# only, so the first build there downloads raylib-zig and raylib into Zig's
+# global cache, as on a fresh clone.
+
+[jj-ci]
+version = 1
+
+# Every directory that holds Zig code. A new one must be added here.
+[checks.fmt]
+command = ["zig", "fmt", "--check", "build.zig", "build.zig.zon", "engine", "game", "server", "client"]
+requires = ["zig"]
+stages = ["push", "ci"]
+
+# A Debug build of both programs. Configuring it also runs build.zig's
+# checkLayering, and compiling the Client runs the client Engine's
+# api_check.zig: the two checks that enforce ADR 0001.
+[checks.build]
+command = ["zig", "build"]
+requires = ["zig"]
+stages = ["push", "ci"]
+
+[checks.test]
+command = ["zig", "build", "test"]
+requires = ["zig"]
+stages = ["push", "ci"]
+
+# The Windows executables, cross-built with Zig's default `gnu` ABI and kept
+# by CI as an artifact for whoever plays on Windows.
+#
+# It runs in the working copy (`workspace`), where CI's upload step finds
+# zig-out/; in CI's one-commit checkout, that copy is the commit checked. It is
+# never cached, since its point is the files it leaves behind. Not in "push":
+# it costs a second full build of raylib.
+[checks.windows]
+command = [
+  "zig", "build",
+  "-Dtarget=x86_64-windows-gnu",
+  "-Doptimize=ReleaseSafe",
+  "--prefix", "zig-out/x86_64-windows",
+]
+requires = ["zig"]
+workspace = true
+cache = false
+stages = ["ci"]
