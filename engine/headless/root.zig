@@ -3,6 +3,7 @@
 //! it knows nothing about R-Type (ADR 0001).
 
 pub const bytes = @import("bytes.zig");
+pub const ecs = @import("ecs.zig");
 pub const net = @import("net.zig");
 pub const time = @import("time.zig");
 
