@@ -14,6 +14,10 @@ _Avoid_: framework, core
 R-Type's rules, world and assets, built on top of the Engine.
 _Avoid_: game (for a single play-through, use Match)
 
+**World**:
+Where a program keeps the things it moves and draws: on the Server, the Match's entities; on each Client, what only that Client draws, such as explosions.
+_Avoid_: registry, scene, level, world (for the play area, which is the screen)
+
 ### Programs and people
 
 **Server**:
@@ -30,16 +34,43 @@ _Avoid_: user, client (for the person)
 ### Play
 
 **Match**:
-One play-through shared by up to four Players, from its start to game over.
+One play-through shared by up to four Players, from the first Player joining to game over.
 _Avoid_: game, session, instance, room
+
+**Join window**:
+The first part of a Match, before any Enemy appears, and the only time a Client can join it.
+_Avoid_: grace period, lobby, countdown
+
+**Game over**:
+The end of a Match, once no Ship is left.
+
+**Entity**:
+A Ship, an Enemy or a Projectile: anything in a Match whose position a Snapshot carries.
+_Avoid_: object, actor, unit
 
 **Ship**:
 The entity a Player controls during a Match.
 _Avoid_: spaceship, player (for the entity)
 
+**Hit points**:
+How many more hits a Ship or an Enemy can take; at zero, it is destroyed.
+_Avoid_: life, lives, health
+
+**Invulnerability**:
+The period after a hit during which a Ship can neither be hurt nor fire.
+_Avoid_: immunity, invincibility, grace period
+
 **Enemy**:
 A hostile entity controlled by the Server.
 _Avoid_: monster, mob, Bydo (the in-story name of the enemy faction)
+
+**Dart**:
+A fast Enemy that weaves in a line with the rest of its Wave and never fires.
+_Avoid_: fighter
+
+**Pod**:
+A slow Enemy that takes several hits and fires at the nearest Ship.
+_Avoid_: turret, dome
 
 **Projectile**:
 Anything fired that harms on contact; it always has an owner, either a Ship or an Enemy.
@@ -72,8 +103,12 @@ Something that happened in a Match that every Player must learn of, such as a Pl
 _Avoid_: event (kept for the Engine's internal messages), notification
 
 **Connection**:
-The link between one Client and the Server, from the moment the Server accepts the Client until the Client disconnects or times out.
+The link between one Client and the Server, from the moment the Server accepts the Client until the Client disconnects, or either side stops hearing from the other.
 _Avoid_: session
+
+**Refusal**:
+The Server's answer to a connect it cannot take, giving the reason: the Match is full, or it has already started.
+_Avoid_: reject, rejection
 
 ### Time
 
