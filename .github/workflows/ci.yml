@@ -1,0 +1,54 @@
+# Runs .jj-ci.toml's "ci" stage. That file says what runs; this one says
+# where, and installs what the checks need.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux checks
+    # Not ubuntu-latest: the apt package names below are those of 24.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      # One commit, the default: every check judges a tree, not a history.
+      - uses: actions/checkout@v7
+
+      # What raylib's build.zig links on Linux with its default X11 backend:
+      # GL, X11, Xrandr, Xinerama, Xi and Xcursor.
+      - name: Install raylib's X11 and OpenGL development packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libgl-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev
+
+      # No version: it reads minimum_zig_version from build.zig.zon, 0.16.0.
+      # It also keeps Zig's global cache, which holds raylib, between runs.
+      - uses: mlugg/setup-zig@v2.2.1
+
+      # jj and nushell pinned to the versions jj-ci was tested against, so
+      # that a new release of either cannot change the build.
+      - uses: renman-ymd/jj-ci@v1
+        with:
+          jj-version: 0.45.1
+          nu-version: 0.115.1
+
+      - name: Keep the Windows executables
+        uses: actions/upload-artifact@v7
+        with:
+          name: r-type-x86_64-windows
+          path: zig-out/x86_64-windows/bin/
+          if-no-files-found: error
