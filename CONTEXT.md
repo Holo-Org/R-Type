@@ -30,16 +30,39 @@ _Avoid_: user, client (for the person)
 ### Play
 
 **Match**:
-One play-through shared by up to four Players, from its start to game over.
+One play-through shared by up to four Players, from the first Player joining to game over.
 _Avoid_: game, session, instance, room
+
+**Join window**:
+The first part of a Match, before any Enemy appears, and the only time a Client can join it.
+_Avoid_: grace period, lobby, countdown
+
+**Game over**:
+The end of a Match, once no Ship is left.
 
 **Ship**:
 The entity a Player controls during a Match.
 _Avoid_: spaceship, player (for the entity)
 
+**Hit points**:
+How many more hits a Ship or an Enemy can take; at zero, it is destroyed.
+_Avoid_: life, lives, health
+
+**Invulnerability**:
+The period after a hit during which a Ship can neither be hurt nor fire.
+_Avoid_: immunity, invincibility, grace period
+
 **Enemy**:
 A hostile entity controlled by the Server.
 _Avoid_: monster, mob, Bydo (the in-story name of the enemy faction)
+
+**Dart**:
+A fast Enemy that weaves in a line with the rest of its Wave and never fires.
+_Avoid_: fighter
+
+**Pod**:
+A slow Enemy that takes several hits and fires at the nearest Ship.
+_Avoid_: turret, dome
 
 **Projectile**:
 Anything fired that harms on contact; it always has an owner, either a Ship or an Enemy.
