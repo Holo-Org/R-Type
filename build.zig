@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const unit_tests = b.step("test", "Run the unit tests");
-    for ([_]*Module{ engine_headless, game, engine_client }) |module| {
+    for ([_]*Module{ engine_headless, game, engine_client, server.root_module }) |module| {
         unit_tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = module })).step);
     }
 
