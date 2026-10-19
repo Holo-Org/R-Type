@@ -81,7 +81,7 @@ pub fn Table(comptime capacity_: usize, comptime Row_: type) type {
             .columns = undefined,
             .ids = undefined,
             .len = 0,
-            .in_use = .initEmpty(),
+            .in_use = .empty,
             .next_id = 0,
             .dropped = 0,
         };
@@ -294,7 +294,7 @@ test "an id comes back only after the counter wraps, and never while in use" {
         try testing.expect(id != kept);
         t.removeIf(id, isId);
     }
-    var seen: std.StaticBitSet(256) = .initEmpty();
+    var seen: std.StaticBitSet(256) = .empty;
     for (0..3) |_| seen.set(t.spawn(.{ .age = 1 }).?);
     try testing.expect(!seen.isSet(kept));
     try testing.expectEqual(null, t.spawn(.{ .age = 1 }));
