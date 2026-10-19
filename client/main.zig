@@ -16,8 +16,8 @@ const game = @import("game");
 const protocol = game.protocol;
 const Actions = protocol.Actions;
 const tick_rate = game.match.tick_rate;
-const world_width = game.match.world_width;
-const world_height = game.match.world_height;
+const screen_width = game.match.screen_width;
+const screen_height = game.match.screen_height;
 
 const Settings = @import("settings.zig").Settings;
 const sound = @import("sound.zig");
@@ -93,7 +93,7 @@ fn drawHud(frame: *engine.Frame, me: ?u8, snapshot: *const protocol.Snapshot, se
         frame.drawText(text, 16, 12, 20, .white);
     }
     const players = std.fmt.bufPrint(&buffer, "{d}/{d} Players", .{ snapshot.shipSlice().len, protocol.max_players }) catch unreachable;
-    frame.drawText(players, world_width - 150, 12, 20, .white);
+    frame.drawText(players, screen_width - 150, 12, 20, .white);
 }
 
 /// The Client's end of the conversation with the Server: numbers the
@@ -131,7 +131,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
 
     // Released in the reverse order, by the defers: the sound before the
     // audio device, the textures before the window.
-    var window = try engine.Window.open(world_width, world_height, "R-Type", 60);
+    var window = try engine.Window.open(screen_width, screen_height, "R-Type", 60);
     defer window.close();
     var audio: ?engine.AudioDevice = engine.AudioDevice.open() catch |err| no_audio: {
         log(io, "r-type_client: cannot open the audio output ({t}); playing without sound", .{err});
@@ -146,7 +146,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     defer if (pew) |*p| p.unload();
     const ships = try sprites.ShipSprites.load(&window);
     defer ships.unload();
-    var starfield: Starfield = .init(world_width, world_height, 2026);
+    var starfield: Starfield = .init(screen_width, screen_height, 2026);
 
     var me: ?u8 = null; // our Player index, once accepted
     var latest: protocol.Snapshot = .{};
