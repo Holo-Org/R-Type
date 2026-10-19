@@ -40,7 +40,63 @@ pub const Rect = struct {
     height: f32 = 0,
 };
 
-pub const Key = enum { up, down, left, right, space };
+/// A key, named after where it sits on a US (QWERTY) keyboard, whatever the
+/// layout: on an AZERTY keyboard, `.w` is the key marked Z. Escape is left
+/// out, since it closes the Window.
+pub const Key = enum {
+    // zig fmt: off
+    a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z,
+    zero, one, two, three, four, five, six, seven, eight, nine,
+    up, down, left, right,
+    space, enter, tab, backspace,
+    left_shift, right_shift, left_control, right_control, left_alt, right_alt,
+    comma, period, slash, semicolon, apostrophe, minus, equal,
+    // zig fmt: on
+};
+
+/// A gamepad button, named after where it sits rather than after its label:
+/// `.face_down` is Xbox's A and PlayStation's cross. The left stick counts as
+/// four more buttons, held while it is pushed more than half-way.
+pub const GamepadButton = enum {
+    dpad_up,
+    dpad_down,
+    dpad_left,
+    dpad_right,
+    face_up,
+    face_down,
+    face_left,
+    face_right,
+    left_bumper,
+    right_bumper,
+    left_trigger,
+    right_trigger,
+    select,
+    start,
+    left_stick_press,
+    right_stick_press,
+    left_stick_up,
+    left_stick_down,
+    left_stick_left,
+    left_stick_right,
+};
+
+/// Something a player holds to ask for an Action: a key, or a button on any
+/// connected gamepad.
+pub const Control = union(enum) {
+    key: Key,
+    gamepad: GamepadButton,
+};
+
+/// For each value of a program's `Action` enum, the Controls that ask for
+/// it, any one of them being enough. A settings file can hold it.
+pub fn Bindings(comptime Action: type) type {
+    return std.enums.EnumFieldStruct(Action, []const Control, null);
+}
+
+/// How far a stick must be pushed to count as a held button.
+const stick_threshold = 0.5;
+/// raylib follows at most this many gamepads.
+const max_gamepads = 4;
 
 pub const Error = error{
     /// No window or graphics context could be opened.
@@ -66,13 +122,37 @@ fn toRaylibRect(rect: Rect) rl.Rectangle {
 }
 
 fn toRaylibKey(key: Key) rl.KeyboardKey {
+    // The Engine's names are raylib's: a renamed key fails to compile here.
     return switch (key) {
-        .up => .up,
-        .down => .down,
-        .left => .left,
-        .right => .right,
-        .space => .space,
+        inline else => |k| @field(rl.KeyboardKey, @tagName(k)),
     };
+}
+
+fn isGamepadButtonDown(gamepad: i32, button: GamepadButton) bool {
+    const pressed: rl.GamepadButton = switch (button) {
+        .dpad_up => .left_face_up,
+        .dpad_down => .left_face_down,
+        .dpad_left => .left_face_left,
+        .dpad_right => .left_face_right,
+        .face_up => .right_face_up,
+        .face_down => .right_face_down,
+        .face_left => .right_face_left,
+        .face_right => .right_face_right,
+        .left_bumper => .left_trigger_1,
+        .right_bumper => .right_trigger_1,
+        .left_trigger => .left_trigger_2,
+        .right_trigger => .right_trigger_2,
+        .select => .middle_left,
+        .start => .middle_right,
+        .left_stick_press => .left_thumb,
+        .right_stick_press => .right_thumb,
+        // The y axis points down.
+        .left_stick_up => return rl.getGamepadAxisMovement(gamepad, .left_y) < -stick_threshold,
+        .left_stick_down => return rl.getGamepadAxisMovement(gamepad, .left_y) > stick_threshold,
+        .left_stick_left => return rl.getGamepadAxisMovement(gamepad, .left_x) < -stick_threshold,
+        .left_stick_right => return rl.getGamepadAxisMovement(gamepad, .left_x) > stick_threshold,
+    };
+    return rl.isGamepadButtonDown(gamepad, pressed);
 }
 
 /// The window and its graphics context. raylib supports a single window.
@@ -99,8 +179,33 @@ pub const Window = struct {
         return rl.getFrameTime();
     }
 
-    pub fn isKeyDown(_: *const Window, key: Key) bool {
-        return rl.isKeyDown(toRaylibKey(key));
+    /// Whether `control` is held: a key, or a button on any connected gamepad.
+    pub fn isDown(_: *const Window, control: Control) bool {
+        switch (control) {
+            .key => |key| return rl.isKeyDown(toRaylibKey(key)),
+            .gamepad => |button| {
+                for (0..max_gamepads) |gamepad| {
+                    const index: i32 = @intCast(gamepad);
+                    if (rl.isGamepadAvailable(index) and isGamepadButtonDown(index, button)) return true;
+                }
+                return false;
+            },
+        }
+    }
+
+    /// The Actions held during this Frame: those with at least one Control
+    /// held in `bindings`.
+    pub fn actionsHeld(window: *const Window, comptime Action: type, bindings: Bindings(Action)) std.EnumSet(Action) {
+        var held: std.EnumSet(Action) = .empty;
+        inline for (comptime std.enums.values(Action)) |action| {
+            for (@field(bindings, @tagName(action))) |control| {
+                if (window.isDown(control)) {
+                    held.insert(action);
+                    break;
+                }
+            }
+        }
+        return held;
     }
 
     /// Decodes an image file held in memory, such as one compiled into the

@@ -45,6 +45,9 @@ pub const MessageType = enum(u8) {
     player_left,
 };
 
+/// Something a Player can ask their Ship to do.
+pub const Action = enum { up, down, left, right, fire };
+
 /// The Actions a Player holds, one bit each, `up` in the lowest bit.
 pub const Actions = packed struct(u8) {
     up: bool = false,
@@ -54,6 +57,16 @@ pub const Actions = packed struct(u8) {
     fire: bool = false,
     /// Bits that name no Action: the decoder rejects a datagram that sets one.
     _: u3 = 0,
+
+    /// One bit for each Action in `held`.
+    pub fn of(held: std.EnumSet(Action)) Actions {
+        var actions: Actions = .{};
+        // Every Action has its bit: a missing one fails to compile here.
+        inline for (comptime std.enums.values(Action)) |action| {
+            @field(actions, @tagName(action)) = held.contains(action);
+        }
+        return actions;
+    }
 };
 
 /// The Actions a Player held during one Client Tick.
@@ -272,6 +285,14 @@ test "the layout matches the wire format" {
     try expectBytes(withHeader(5, &.{ 9, 0, 0, 0, 2, 1, 0x02, 0x01, 0x04, 0x03, 3, 5, 0, 6, 0 }), .{ .snapshot = snapshot });
     try expectBytes(withHeader(6, &.{}), .disconnect);
     try expectBytes(withHeader(7, &.{3}), .{ .player_left = .{ .player = 3 } });
+}
+
+test "Actions hold one bit per Action held" {
+    var held: std.EnumSet(Action) = .empty;
+    try testing.expectEqual(Actions{}, Actions.of(held));
+    held.insert(.up);
+    held.insert(.fire);
+    try testing.expectEqual(Actions{ .up = true, .fire = true }, Actions.of(held));
 }
 
 test "decodes what it encodes" {
