@@ -33,7 +33,7 @@ fn parsePort(args: []const [:0]const u8) ?u16 {
 const Server = struct {
     io: Io,
     transport: *net.UdpTransport,
-    match: Match = .{},
+    match: Match,
     /// Sequence number of the last datagram sent.
     sequence: u32 = 0,
     received: usize = 0,
@@ -46,11 +46,16 @@ const Server = struct {
             const datagram = s.transport.receive() orelse break;
             s.handle(&datagram);
         }
-        var dropped = s.match.step().iterator(.{});
+        const events = s.match.step();
+        if (events.match_started) |seed| log(s.io, "Tick {d}: a Match begins, seed {d}", .{ s.match.tick, seed });
+        var dropped = events.timed_out.iterator(.{});
         while (dropped.next()) |player| {
             log(s.io, "Tick {d}: Player {d} timed out", .{ s.match.tick, player + 1 });
             s.tellEveryone(.{ .player_left = .{ .player = @intCast(player) } });
         }
+        // Protocol v1 (#26) announces these, and explosions, to the Clients.
+        for (events.shipDestroyedSlice()) |ship| log(s.io, "Tick {d}: Player {d}'s Ship destroyed", .{ s.match.tick, ship.player + 1 });
+        if (events.game_over) log(s.io, "Tick {d}: game over", .{s.match.tick});
         s.tellEveryone(.{ .snapshot = s.match.snapshot() });
         if (s.match.tick % (5 * tick_rate) == 0) s.report();
     }
@@ -77,8 +82,10 @@ const Server = struct {
 
     fn connect(s: *Server, peer: net.Endpoint) void {
         const known = s.match.find(peer) != null;
-        const player = s.match.join(peer) orelse {
+        const player = s.match.join(peer) catch |err| {
+            // Protocol v1 (#26) adds a reason for a Match that already started.
             s.send(peer, .{ .reject = .{ .reason = .match_full } });
+            if (!known) log(s.io, "Tick {d}: refused {f}: {t}", .{ s.match.tick, peer, err });
             return;
         };
         if (!known) log(s.io, "Tick {d}: Player {d} joined from {f}", .{ s.match.tick, player + 1, peer });
@@ -128,7 +135,9 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     };
     defer transport.close();
-    var server: Server = .{ .io = io, .transport = transport };
+    var seed: u64 = undefined;
+    io.random(std.mem.asBytes(&seed));
+    var server: Server = .{ .io = io, .transport = transport, .match = .init(.{ .seed = seed }) };
     log(io, "r-type_server: listening on UDP port {d}, {d} Ticks per second", .{ transport.localPort(), tick_rate });
 
     var ticks: FixedStep = .init(io, .fromNanoseconds(std.time.ns_per_s / tick_rate));
@@ -136,3 +145,4 @@ pub fn main(init: std.process.Init) !u8 {
         for (0..try ticks.wait()) |_| server.tick();
     }
 }
+

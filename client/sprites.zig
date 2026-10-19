@@ -43,8 +43,8 @@ pub const ShipSprites = struct {
         const on_screen: engine.Rect = .{
             .x = @floatFromInt(ship.x),
             .y = @floatFromInt(ship.y),
-            .width = game.match.ship_width,
-            .height = game.match.ship_height,
+            .width = game.rules.ship.box.width,
+            .height = game.rules.ship.box.height,
         };
         frame.drawTexture(&sprites.sheet, cell, on_screen, .white);
     }
