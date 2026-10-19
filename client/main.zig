@@ -1,5 +1,6 @@
 //! r-type_client: shows the Match and sends the Player's inputs every Tick.
 //! Players are numbered from 1 on screen and in logs; the protocol counts from 0.
+//! The keys and gamepad buttons for each Action come from settings.zon.
 //!
 //! The Engine's network thread receives the Server's datagrams; the main
 //! thread drains them every Frame, sends one input per Tick whatever the frame
@@ -8,8 +9,9 @@
 const std = @import("std");
 const Io = std.Io;
 const engine = @import("engine_client");
-const net = @import("engine_headless").net;
-const FixedStep = @import("engine_headless").time.FixedStep;
+const engine_headless = @import("engine_headless");
+const net = engine_headless.net;
+const FixedStep = engine_headless.time.FixedStep;
 const game = @import("game");
 const protocol = game.protocol;
 const Actions = protocol.Actions;
@@ -17,6 +19,7 @@ const tick_rate = game.match.tick_rate;
 const screen_width = game.match.screen_width;
 const screen_height = game.match.screen_height;
 
+const Settings = @import("settings.zig").Settings;
 const sound = @import("sound.zig");
 const sprites = @import("sprites.zig");
 const Starfield = @import("starfield.zig").Starfield;
@@ -65,14 +68,9 @@ fn parseOptions(args: []const [:0]const u8) ?Options {
     return options;
 }
 
-fn keyboardActions(window: *const engine.Window) Actions {
-    return .{
-        .up = window.isKeyDown(.up),
-        .down = window.isKeyDown(.down),
-        .left = window.isKeyDown(.left),
-        .right = window.isKeyDown(.right),
-        .fire = window.isKeyDown(.space),
-    };
+/// The Actions whose keys or gamepad buttons the Player holds.
+fn heldActions(window: *const engine.Window, settings: *const Settings) Actions {
+    return .of(window.actionsHeld(protocol.Action, settings.bindings));
 }
 
 /// Unattended play: every pattern flies a square, starting on a different
@@ -125,7 +123,7 @@ const ServerLink = struct {
     }
 };
 
-fn run(gpa: std.mem.Allocator, io: Io, options: Options) !void {
+fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settings) !void {
     const server = net.resolve(io, options.host, options.port) orelse return error.CannotResolve;
     const transport = try net.UdpTransport.open(gpa, io, 0);
     defer transport.close();
@@ -179,7 +177,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options) !void {
 
         for (0..ticks.poll()) |_| {
             tick +%= 1;
-            const actions = if (options.script) |pattern| scriptedActions(pattern, tick) else keyboardActions(&window);
+            const actions = if (options.script) |pattern| scriptedActions(pattern, tick) else heldActions(&window, settings);
             const previous = input.recent;
             input.recent = .{ .{ .tick = tick, .actions = actions }, previous[0], previous[1] };
             if (actions.fire and !previous[0].actions.fire) {
@@ -221,7 +219,12 @@ pub fn main(init: std.process.Init) !u8 {
         log(io, usage, .{});
         return 2;
     };
-    run(init.gpa, io, options) catch |err| {
+    const settings = engine_headless.settings.load(Settings, init.arena.allocator(), io, init.environ_map, .{
+        .app = "r-type",
+        .name = "settings.zon",
+        .defaults = @import("settings.zig").defaults_file,
+    });
+    run(init.gpa, io, options, &settings) catch |err| {
         switch (err) {
             error.CannotResolve => log(io, "r-type_client: cannot resolve {s}", .{options.host}),
             error.MatchFull => log(io, "r-type_client: the Match is full", .{}),
@@ -230,4 +233,8 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     };
     return 0;
+}
+
+test {
+    _ = @import("settings.zig");
 }

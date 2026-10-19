@@ -1,0 +1,38 @@
+// R-Type's settings. Edit this file to change them, or delete it to get the
+// defaults back the next time r-type_client starts.
+//
+// r-type_client first looks for a settings.zon in the folder that holds it,
+// which then replaces this file entirely, then for this one. A file it cannot
+// read is reported in the terminal and skipped.
+.{
+    // The keys and gamepad buttons for each Action. Each Action takes a list
+    // of Controls, and holding any one of them is enough:
+    //
+    // - .{ .key = .up } is a key, named after where it sits on a US (QWERTY)
+    //   keyboard, whatever the layout: on an AZERTY keyboard, .w is the key
+    //   marked Z, and .a the key marked Q. The keys are .a to .z, .zero to
+    //   .nine, .up, .down, .left, .right, .space, .enter, .tab, .backspace,
+    //   .left_shift, .right_shift, .left_control, .right_control, .left_alt,
+    //   .right_alt, .comma, .period, .slash, .semicolon, .apostrophe, .minus
+    //   and .equal.
+    //
+    // - .{ .gamepad = .dpad_up } is a button on any connected gamepad, named
+    //   after where it sits: .dpad_up, .dpad_down, .dpad_left, .dpad_right,
+    //   .face_up, .face_down, .face_left, .face_right (.face_down is Xbox's A
+    //   and PlayStation's cross), .left_bumper, .right_bumper, .left_trigger,
+    //   .right_trigger, .select, .start, .left_stick_press and
+    //   .right_stick_press. The left stick, pushed more than half-way, counts
+    //   as .left_stick_up, .left_stick_down, .left_stick_left and
+    //   .left_stick_right.
+    //
+    // For example, to also move with W, A, S and D on a QWERTY keyboard, or
+    // Z, Q, S and D on an AZERTY one:
+    //     .up = .{ .{ .key = .up }, .{ .key = .w }, ... },
+    .bindings = .{
+        .up = .{ .{ .key = .up }, .{ .gamepad = .dpad_up }, .{ .gamepad = .left_stick_up } },
+        .down = .{ .{ .key = .down }, .{ .gamepad = .dpad_down }, .{ .gamepad = .left_stick_down } },
+        .left = .{ .{ .key = .left }, .{ .gamepad = .dpad_left }, .{ .gamepad = .left_stick_left } },
+        .right = .{ .{ .key = .right }, .{ .gamepad = .dpad_right }, .{ .gamepad = .left_stick_right } },
+        .fire = .{ .{ .key = .space }, .{ .gamepad = .face_down } },
+    },
+}
