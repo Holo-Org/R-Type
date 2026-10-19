@@ -4,6 +4,7 @@
 
 pub const bytes = @import("bytes.zig");
 pub const net = @import("net.zig");
+pub const settings = @import("settings.zig");
 pub const time = @import("time.zig");
 
 test {
