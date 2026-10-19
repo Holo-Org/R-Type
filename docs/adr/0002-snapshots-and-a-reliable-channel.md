@@ -16,5 +16,6 @@ Every Tick, each Client sends its Player's Input, repeating its last few Inputs 
 ## Consequences
 
 - K is a Server setting, 1 by default: Clients draw the newest Snapshot as it is, so a larger K shows as jerky movement. In the simulator, 60 Snapshots a second overflowed a 5 KB/s link, and K = 4 fixed it.
-- A Snapshot always fits in one datagram: the Server caps the number of entities, and refuses spawns beyond the cap.
+- A Snapshot always fits in one datagram: the Server should refuse to create Snapshots bigger than the datagram limit.
+- That refusal is a last resort, counted and logged, that should never trigger: the Game refuses any spawn that would push the next Snapshot past the datagram limit. This is the Snapshot's entity cap. Skipping a Snapshot would freeze every Client, and leaving entities out of one would make Clients read them as destroyed.
 - Interpolation, prediction, delta compression and Snapshots split across datagrams are left for Part 2.
