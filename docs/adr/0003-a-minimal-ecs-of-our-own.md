@@ -13,5 +13,6 @@ The Engine's headless part provides a small entity-component-system, used by bot
 
 ## Consequences
 
-- Each program's world holds at most 1024 entities: one array and one bit set per component type, a generation per slot, and queries that combine bit sets. Nothing is allocated after startup, and a spawn into a full world is dropped and counted.
+- Each program fixes its world's capacity at compile time: one array and one bit set per component type, a generation per slot, and queries that combine bit sets. Nothing is allocated after startup, and a spawn into a full world is dropped and counted.
+- Networked entities are also bounded by the Snapshot's entity cap ([ADR 0002](0002-snapshots-and-a-reliable-channel.md)).
 - Growable sparse sets and archetype tables were set aside: R-Type never has more than a few hundred entities, and a fixed capacity also bounds the memory a Match can use.
