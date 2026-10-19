@@ -22,6 +22,9 @@ stages = ["push", "ci"]
 # A Debug build of both programs. Configuring it also runs build.zig's
 # checkLayering, and compiling the Client runs the client Engine's
 # api_check.zig: the two checks that enforce ADR 0001.
+#
+# jj-ci does not run on Windows, so ci.yml's Windows job runs this command and
+# the next one itself: a change here belongs there too.
 [checks.build]
 command = ["zig", "build"]
 requires = ["zig"]
