@@ -3,6 +3,8 @@
 
 pub const protocol = @import("protocol.zig");
 pub const match = @import("match.zig");
+pub const rules = @import("rules.zig");
+pub const world = @import("world.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
