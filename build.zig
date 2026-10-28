@@ -73,9 +73,12 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    // The sprite sheet is compiled into the program, so that it runs on its
-    // own: client/sprites.zig reads it with @embedFile("ship_sheet").
-    client.root_module.addAnonymousImport("ship_sheet", .{ .root_source_file = b.path("assets/r-typesheet42.gif") });
+    // The sprite sheets are compiled into the program, so that it runs on its
+    // own: client/sprites.zig reads each with @embedFile, by its file name.
+    for ([_][]const u8{ "1", "3", "5", "42", "43", "44" }) |number| {
+        const name = b.fmt("r-typesheet{s}.gif", .{number});
+        client.root_module.addAnonymousImport(name, .{ .root_source_file = b.path(b.fmt("assets/{s}", .{name})) });
+    }
     b.installArtifact(client);
 
     for ([_]struct { []const u8, *std.Build.Step.Compile }{ .{ "server", server }, .{ "client", client } }) |program| {
