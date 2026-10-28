@@ -1,0 +1,133 @@
+# Publishes a GitHub Release holding the Linux and Windows programs:
+# - when a pull request labelled "00.release: major", "minor" or "patch" is
+#   merged into main, the next version is tagged on its merge commit;
+# - when a version tag is pushed by hand, that tag is released;
+# - when this workflow is run by hand with an existing tag, that tag is
+#   released: for a tag on a commit older than this file, such as v0.1.0 on
+#   the Part 1 delivery, since a pushed tag runs the workflows of its commit.
+#
+# The tag this workflow creates does not start it again: events caused by
+# GITHUB_TOKEN start no workflow. For the same reason, a merge must be made by
+# a person, or later by the merge App (#20), to start this one.
+
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing version tag to release, such as v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+# One release at a time, so that two merges in a row never take the same
+# version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.merged &&
+        (contains(github.event.pull_request.labels.*.name, '00.release: major') ||
+        contains(github.event.pull_request.labels.*.name, '00.release: minor') ||
+        contains(github.event.pull_request.labels.*.name, '00.release: patch')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # For a merge, the commit it made on main, not the pull request's head;
+      # for a run by hand, the tag's commit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.tag || github.ref }}
+
+      - name: Choose the version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          PUSHED_TAG: ${{ github.ref_name }}
+          GIVEN_TAG: ${{ inputs.tag }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            version=$PUSHED_TAG
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            if [[ ! $GIVEN_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::not a version tag: $GIVEN_TAG"
+              exit 1
+            fi
+            version=$GIVEN_TAG
+          else
+            # The largest bump among the labels.
+            for bump in major minor patch; do
+              jq -e --arg label "00.release: $bump" 'index($label) != null' <<<"$LABELS" >/dev/null && break
+            done
+            latest=$(git ls-remote --tags --refs origin 'v*' | sed 's|.*refs/tags/||' |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+            version=$(.github/scripts/next-version.sh "$bump" "$latest")
+            echo "$bump bump from ${latest:-no tag yet}"
+          fi
+          echo "releasing $version"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Install raylib's X11 and OpenGL development packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libgl-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev
+
+      - uses: mlugg/setup-zig@v2.2.1
+
+      # For glibc 2.31 rather than the runner's, so that the Client runs on
+      # Ubuntu 20.04, Debian 11 and later, and for a baseline x86-64 CPU, which
+      # an explicit target implies. With an explicit target, Zig no longer
+      # looks in Debian's multiarch folder, so a prefix shows it the system's
+      # libraries and the X11 and OpenGL headers only: the C library's headers
+      # must be the ones Zig brings for glibc 2.31.
+      - name: Build for Linux
+        run: |
+          system=$RUNNER_TEMP/system
+          mkdir -p "$system/include"
+          ln -s /usr/lib/x86_64-linux-gnu "$system/lib"
+          for headers in X11 GL KHR; do ln -s "/usr/include/$headers" "$system/include/$headers"; done
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-gnu.2.31 \
+            --search-prefix "$system" --prefix "$RUNNER_TEMP/linux"
+
+      - name: Build for Windows
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-windows-gnu --prefix "$RUNNER_TEMP/windows"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          name=r-type-$VERSION
+          stage=$RUNNER_TEMP/stage
+          mkdir -p dist "$stage/linux/$name" "$stage/windows/$name"
+          cp "$RUNNER_TEMP"/linux/bin/r-type_{server,client} "$stage/linux/$name/"
+          cp "$RUNNER_TEMP"/windows/bin/r-type_{server,client}.exe "$stage/windows/$name/"
+          tar -czf "dist/$name-x86_64-linux.tar.gz" -C "$stage/linux" "$name"
+          (cd "$stage/windows" && zip -qr "$GITHUB_WORKSPACE/dist/$name-x86_64-windows.zip" "$name")
+          (cd dist && sha256sum -- * >SHA256SUMS && cat SHA256SUMS)
+
+      # For a merge, this also creates the tag, on the merge commit; otherwise
+      # the tag must already exist.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ -n "$MERGE_COMMIT" ]; then where=(--target "$MERGE_COMMIT"); else where=(--verify-tag); fi
+          gh release create "$VERSION" dist/* "${where[@]}" --title "R-Type $VERSION" --generate-notes
