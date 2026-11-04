@@ -1,5 +1,6 @@
-# Runs .jj-ci.toml's "ci" stage. That file says what runs; this one says
-# where, and installs what the checks need.
+# Runs .jj-ci.toml's "ci" stage on Linux, and its build and tests natively on
+# Windows. .jj-ci.toml says what runs; this file says where, and installs what
+# the checks need.
 
 name: CI
 
@@ -52,3 +53,29 @@ jobs:
           name: r-type-x86_64-windows
           path: zig-out/x86_64-windows/bin/
           if-no-files-found: error
+
+  windows:
+    name: Windows checks
+    runs-on: windows-2025
+    timeout-minutes: 20
+
+    steps:
+      # Windows' git turns LF into CRLF on checkout by default, which would
+      # change the bytes of every file the programs embed.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2.2.1
+
+      # jj-ci runs on Linux and macOS runners only: its checks are nushell
+      # scripts and its entry point a symlink. So this job runs .jj-ci.toml's
+      # build and test commands itself; keep them alike. Natively, unlike the
+      # Linux job's cross-build, this is what exercises Zig 0.16's Windows
+      # networking, through the UDP transport's tests.
+      - name: Build
+        run: zig build
+
+      - name: Test
+        run: zig build test --summary all
