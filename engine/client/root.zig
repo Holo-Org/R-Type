@@ -233,11 +233,22 @@ pub const Frame = struct {
 
     /// Draws text in raylib's default font; beyond 255 bytes, it is cut.
     pub fn drawText(_: *Frame, text: []const u8, x: i32, y: i32, size: i32, color: Color) void {
-        var terminated: [256]u8 = undefined;
-        const len = @min(text.len, terminated.len - 1);
-        @memcpy(terminated[0..len], text[0..len]);
-        terminated[len] = 0;
-        rl.drawText(terminated[0..len :0], x, y, size, toRaylibColor(color));
+        var buffer: [256]u8 = undefined;
+        rl.drawText(terminate(&buffer, text), x, y, size, toRaylibColor(color));
+    }
+
+    /// How wide `drawText` draws `text` at `size`, in pixels.
+    pub fn measureText(_: *const Frame, text: []const u8, size: i32) i32 {
+        var buffer: [256]u8 = undefined;
+        return rl.measureText(terminate(&buffer, text), size);
+    }
+
+    /// `text`, cut to fit `buffer`, with the zero raylib looks for at its end.
+    fn terminate(buffer: *[256]u8, text: []const u8) [:0]const u8 {
+        const len = @min(text.len, buffer.len - 1);
+        @memcpy(buffer[0..len], text[0..len]);
+        buffer[len] = 0;
+        return buffer[0..len :0];
     }
 
     /// Draws the `source` part of `texture` stretched over `destination`.

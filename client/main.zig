@@ -4,7 +4,8 @@
 //!
 //! The Engine's network thread receives the Server's datagrams; the main
 //! thread drains them every Frame, sends one input per Tick whatever the frame
-//! rate, and draws the newest snapshot.
+//! rate, and draws the newest snapshot. With `--demo`, a Match runs inside the
+//! Client instead, and no Server is needed.
 
 const std = @import("std");
 const Io = std.Io;
@@ -20,11 +21,13 @@ const screen_width = game.match.screen_width;
 const screen_height = game.match.screen_height;
 
 const Settings = @import("settings.zig").Settings;
+const demo_ = @import("demo.zig");
+const Demo = demo_.Demo;
+const hud = @import("hud.zig");
 const sound = @import("sound.zig");
-const sprites = @import("sprites.zig");
-const Starfield = @import("starfield.zig").Starfield;
+const View = @import("view.zig").View;
 
-const usage = "usage: r-type_client [--host <host>] [--port <port>] [--script <n>] [--frames <n> [--screenshot <file.png>]]";
+const usage = "usage: r-type_client [--host <host>] [--port <port>] [--demo <seed>] [--script <n>] [--frames <n> [--screenshot <file.png>]]";
 
 fn log(io: Io, comptime format: []const u8, args: anytype) void {
     const stderr = io.lockStderr(&.{}, null) catch return;
@@ -35,6 +38,8 @@ fn log(io: Io, comptime format: []const u8, args: anytype) void {
 const Options = struct {
     host: []const u8 = "127.0.0.1",
     port: u16 = 4242,
+    /// Play a Match run inside the Client, from this seed.
+    demo: ?u64 = null,
     /// Play unattended, following pattern N.
     script: ?u32 = null,
     /// Quit after N Frames.
@@ -54,6 +59,8 @@ fn parseOptions(args: []const [:0]const u8) ?Options {
             options.host = value;
         } else if (std.mem.eql(u8, name, "--port")) {
             options.port = std.fmt.parseInt(u16, value, 10) catch return null;
+        } else if (std.mem.eql(u8, name, "--demo")) {
+            options.demo = std.fmt.parseInt(u64, value, 10) catch return null;
         } else if (std.mem.eql(u8, name, "--script")) {
             options.script = std.fmt.parseInt(u32, value, 10) catch return null;
         } else if (std.mem.eql(u8, name, "--frames")) {
@@ -71,29 +78,6 @@ fn parseOptions(args: []const [:0]const u8) ?Options {
 /// The Actions whose keys or gamepad buttons the Player holds.
 fn heldActions(window: *const engine.Window, settings: *const Settings) Actions {
     return .of(window.actionsHeld(protocol.Action, settings.bindings));
-}
-
-/// Unattended play: every pattern flies a square, starting on a different
-/// side, and fires every two seconds.
-fn scriptedActions(pattern: u32, tick: u32) Actions {
-    const legs = [_]Actions{ .{ .right = true }, .{ .down = true }, .{ .left = true }, .{ .up = true } };
-    const leg_ticks = 45;
-    var actions = legs[((tick / leg_ticks) +% pattern) % legs.len];
-    actions.fire = tick % (2 * tick_rate) == 0;
-    return actions;
-}
-
-fn drawHud(frame: *engine.Frame, me: ?u8, snapshot: *const protocol.Snapshot, server: net.Endpoint) void {
-    var buffer: [64]u8 = undefined;
-    if (me) |player| {
-        const text = std.fmt.bufPrint(&buffer, "Player {d}", .{player + 1}) catch unreachable;
-        frame.drawText(text, 16, 12, 20, sprites.player_colors[player]);
-    } else {
-        const text = std.fmt.bufPrint(&buffer, "Connecting to {f}...", .{server}) catch unreachable;
-        frame.drawText(text, 16, 12, 20, .white);
-    }
-    const players = std.fmt.bufPrint(&buffer, "{d}/{d} Players", .{ snapshot.shipSlice().len, protocol.max_players }) catch unreachable;
-    frame.drawText(players, screen_width - 150, 12, 20, .white);
 }
 
 /// The Client's end of the conversation with the Server: numbers the
@@ -123,11 +107,20 @@ const ServerLink = struct {
     }
 };
 
+/// Where the Scenes come from.
+const Source = union(enum) {
+    server: ServerLink,
+    demo: Demo,
+};
+
 fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settings) !void {
-    const server = net.resolve(io, options.host, options.port) orelse return error.CannotResolve;
-    const transport = try net.UdpTransport.open(gpa, io, 0);
-    defer transport.close();
-    var link: ServerLink = .{ .transport = transport, .server = server };
+    var transport: ?*net.UdpTransport = null;
+    defer if (transport) |t| t.close();
+    var source: Source = if (options.demo) |seed| .{ .demo = .init(seed) } else server: {
+        const server = net.resolve(io, options.host, options.port) orelse return error.CannotResolve;
+        transport = try net.UdpTransport.open(gpa, io, 0);
+        break :server .{ .server = .{ .transport = transport.?, .server = server } };
+    };
 
     // Released in the reverse order, by the defers: the sound before the
     // audio device, the textures before the window.
@@ -144,58 +137,76 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
         break :no_sound null;
     } else null;
     defer if (pew) |*p| p.unload();
-    const ships = try sprites.ShipSprites.load(&window);
-    defer ships.unload();
-    var starfield: Starfield = .init(screen_width, screen_height, 2026);
+    var view: View = try .init(&window);
+    defer view.deinit();
 
     var me: ?u8 = null; // our Player index, once accepted
-    var latest: protocol.Snapshot = .{};
     var input: protocol.Input = .{};
     var tick: u32 = 0;
     var ticks: FixedStep = .init(io, .fromNanoseconds(std.time.ns_per_s / tick_rate));
-    log(io, "r-type_client: connecting to {f}", .{server});
+    switch (source) {
+        .server => |link| log(io, "r-type_client: connecting to {f}", .{link.server}),
+        .demo => |demo| {
+            log(io, "r-type_client: playing a demo Match of seed {d}", .{demo.match.settings.seed});
+            me = 0;
+        },
+    }
 
     var frame_count: u32 = 0;
     while (!window.shouldClose()) {
         frame_count += 1;
-        while (link.receive()) |message| {
-            switch (message) {
-                .accept => |accepted| {
-                    if (me != accepted.player) log(io, "Joined the Match as Player {d}", .{accepted.player + 1});
-                    me = accepted.player;
-                },
-                .reject => return error.MatchFull,
-                .snapshot => |snapshot| latest = snapshot,
-                .player_left => |left| {
-                    log(io, "Player {d} left the Match", .{left.player + 1});
-                    if (me == left.player) me = null; // dropped by the Server: connect again
-                },
-                // Messages only Clients send.
-                .connect, .input, .disconnect => {},
+        if (source == .server) {
+            while (source.server.receive()) |message| {
+                switch (message) {
+                    .accept => |accepted| {
+                        if (me != accepted.player) log(io, "Joined the Match as Player {d}", .{accepted.player + 1});
+                        me = accepted.player;
+                    },
+                    .reject => return error.MatchFull,
+                    .snapshot => |snapshot| view.show(.fromSnapshot(&snapshot)),
+                    .player_left => |left| {
+                        log(io, "Player {d} left the Match", .{left.player + 1});
+                        if (me == left.player) me = null; // dropped by the Server: connect again
+                    },
+                    // Messages only Clients send.
+                    .connect, .input, .disconnect => {},
+                }
             }
         }
 
         for (0..ticks.poll()) |_| {
             tick +%= 1;
-            const actions = if (options.script) |pattern| scriptedActions(pattern, tick) else heldActions(&window, settings);
+            const actions = if (options.script) |pattern| demo_.scriptedActions(pattern, tick) else heldActions(&window, settings);
             const previous = input.recent;
             input.recent = .{ .{ .tick = tick, .actions = actions }, previous[0], previous[1] };
             if (actions.fire and !previous[0].actions.fire) {
                 if (pew) |*p| p.play();
             }
-            if (me != null) {
-                link.send(.{ .input = input });
-            } else if (tick % (tick_rate / 2) == 1) {
-                link.send(.connect); // twice a second, until the Server answers
+            switch (source) {
+                .server => |*link| if (me != null) {
+                    link.send(.{ .input = input });
+                } else if (tick % (tick_rate / 2) == 1) {
+                    link.send(.connect); // twice a second, until the Server answers
+                },
+                .demo => |*demo| {
+                    // The Announcements, before the Scene the entities vanished from.
+                    const events = demo.step(actions);
+                    for (events.explosionSlice()) |position| view.enemyDestroyed(position);
+                    for (events.shipDestroyedSlice()) |destroyed| view.shipDestroyed(destroyed.position);
+                    view.show(.fromMatch(&demo.match));
+                },
             }
         }
 
-        starfield.scroll(window.frameTime());
+        view.advance(window.frameTime());
         const last_frame = if (options.frames) |frames| frame_count >= frames else false;
         var frame = window.beginFrame(.black);
-        starfield.draw(&frame);
-        for (latest.shipSlice()) |ship| ships.draw(&frame, ship);
-        drawHud(&frame, me, &latest, server);
+        view.draw(&frame, me);
+        if (me == null) {
+            var buffer: [64]u8 = undefined;
+            const text = std.fmt.bufPrint(&buffer, "Connecting to {f}...", .{source.server.server}) catch unreachable;
+            hud.drawStatus(&frame, text, .white);
+        }
         if (last_frame) {
             if (options.screenshot) |path| {
                 if (frame.saveScreenshot(path)) {
@@ -209,7 +220,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
         if (last_frame) break;
     }
 
-    if (me != null) link.send(.disconnect);
+    if (source == .server and me != null) source.server.send(.disconnect);
 }
 
 pub fn main(init: std.process.Init) !u8 {
@@ -237,4 +248,9 @@ pub fn main(init: std.process.Init) !u8 {
 
 test {
     _ = @import("settings.zig");
+    _ = @import("sprites.zig");
+    _ = @import("scene.zig");
+    _ = @import("effects.zig");
+    _ = @import("view.zig");
+    _ = demo_;
 }
