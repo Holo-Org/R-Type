@@ -4,8 +4,9 @@
 //!
 //! The Engine's network thread receives the Server's datagrams; the main
 //! thread drains them every Frame, sends one input per Tick whatever the frame
-//! rate, and draws the newest snapshot. With `--demo`, a Match runs inside the
-//! Client instead, and no Server is needed.
+//! rate, and draws the newest snapshot. Outside a Match, it keeps trying to
+//! join and says why it waits. Esc leaves (see leaving.zig). With `--demo`, a
+//! Match runs inside the Client instead, and no Server is needed.
 
 const std = @import("std");
 const Io = std.Io;
@@ -28,6 +29,8 @@ const hud = @import("hud.zig");
 const sound = @import("sound.zig");
 const View = @import("view.zig").View;
 const scene_ = @import("scene.zig");
+const Connection = @import("connection.zig").Connection;
+const Leaving = @import("leaving.zig").Leaving;
 
 const usage = "usage: r-type_client [--host <host>] [--port <port>] [--demo <seed>] [--script <n>] [--frames <n> [--screenshot <file.png>]]";
 
@@ -163,7 +166,8 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     defer view.deinit();
 
     var me: ?u8 = null; // our Player index, once accepted
-    var refused = false; // told once that the Match has already started
+    var connection: Connection = .init(0);
+    var leaving: Leaving = .{};
     var input: protocol.Input = .{};
     var tick: u32 = 0;
     var ticks: FixedStep = .init(io, .fromNanoseconds(std.time.ns_per_s / tick_rate));
@@ -181,24 +185,30 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
         if (source == .server) {
             const link = &source.server;
             while (link.receive()) |message| {
+                connection.heard(tick);
                 // The Announcements, before the Scene the entities vanished from.
                 while (link.channel.next()) |announcement| {
                     const was = me;
                     announce(io, &view, &me, announcement);
-                    if (was != null and me == null) link.reset(); // dropped by the Server
+                    if (was != null and me == null) { // dropped by the Server
+                        link.reset();
+                        view.clear();
+                        connection.dropped(tick);
+                    }
                 }
                 switch (message) {
                     .accept => |accepted| {
                         if (me != accepted.player) log(io, "Joined the Match as Player {d}", .{accepted.player + 1});
                         me = accepted.player;
+                        connection.accepted();
                     },
-                    .refusal => |refusal| switch (refusal.reason) {
-                        .match_full => return error.MatchFull,
-                        // Connects keep going out until a join window takes one.
-                        .already_started => if (!refused) {
-                            log(io, "The Match has already started: waiting for the next one", .{});
-                            refused = true;
-                        },
+                    // Connects keep going out until a join window takes one.
+                    .refusal => |refusal| {
+                        if (me == null) {
+                            const before = connection.waiting;
+                            connection.refused(tick, refusal.reason);
+                            if (connection.waiting != before) log(io, "{s}", .{waitingText(connection.waiting.?)});
+                        }
                     },
                     .snapshot => |snapshot| view.show(.fromSnapshot(&snapshot)),
                     // Messages only Clients send.
@@ -216,10 +226,18 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                 if (pew) |*p| p.play();
             }
             switch (source) {
-                .server => |*link| if (me != null) {
-                    link.send(.{ .input = input });
-                } else if (tick % (tick_rate / 2) == 1) {
-                    link.send(.{ .connect = .{} }); // twice a second, until the Server answers
+                .server => |*link| {
+                    if (connection.checkLost(tick)) {
+                        log(io, "Lost the Server: reconnecting", .{});
+                        me = null;
+                        link.reset();
+                        view.clear();
+                    }
+                    if (me != null) {
+                        link.send(.{ .input = input });
+                    } else if (connection.connectDue(tick)) {
+                        link.send(.{ .connect = .{} });
+                    }
                 },
                 .demo => |*demo| {
                     // The Announcements, before the Scene the entities vanished from.
@@ -232,14 +250,21 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
         }
 
         view.advance(window.frameTime());
+        if (window.escapePressed() and leaving.escape(view.clock, view.shipAlive(me))) break;
         const last_frame = if (options.frames) |frames| frame_count >= frames else false;
         var frame = window.beginFrame(.black);
         view.draw(&frame, me);
-        if (me == null) {
-            var buffer: [64]u8 = undefined;
-            const text = std.fmt.bufPrint(&buffer, "Connecting to {f}...", .{source.server.server}) catch unreachable;
-            hud.drawStatus(&frame, text, .white);
+        if (source == .server) {
+            if (connection.waiting) |why| {
+                var buffer: [64]u8 = undefined;
+                const text = if (why == .connecting)
+                    std.fmt.bufPrint(&buffer, "Connecting to {f}... {d} s", .{ source.server.server, connection.secondsWaiting(tick) }) catch unreachable
+                else
+                    waitingText(why);
+                hud.drawWaiting(&frame, text);
+            }
         }
+        if (leaving.asking(view.clock)) hud.drawLeavePrompt(&frame);
         if (last_frame) {
             if (options.screenshot) |path| {
                 if (frame.saveScreenshot(path)) {
@@ -254,6 +279,16 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     }
 
     if (source == .server and me != null) source.server.send(.disconnect);
+}
+
+/// Why the Client waits, but for `connecting`, which names the Server.
+fn waitingText(why: @import("connection.zig").Waiting) []const u8 {
+    return switch (why) {
+        .connecting => "Connecting...",
+        .match_full => "The Match is full: waiting for the next one",
+        .already_started => "The Match has already started: waiting for the next one",
+        .lost => "Lost the Server: reconnecting...",
+    };
 }
 
 /// Visual Announcements later than this are not shown: their entity has
@@ -293,7 +328,6 @@ pub fn main(init: std.process.Init) !u8 {
     run(init.gpa, io, options, &settings) catch |err| {
         switch (err) {
             error.CannotResolve => log(io, "r-type_client: cannot resolve {s}", .{options.host}),
-            error.MatchFull => log(io, "r-type_client: the Match is full", .{}),
             else => log(io, "r-type_client: {t}", .{err}),
         }
         return 1;
@@ -307,5 +341,7 @@ test {
     _ = @import("scene.zig");
     _ = @import("effects.zig");
     _ = @import("view.zig");
+    _ = @import("connection.zig");
+    _ = @import("leaving.zig");
     _ = demo_;
 }
