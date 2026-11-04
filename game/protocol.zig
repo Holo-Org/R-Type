@@ -1,10 +1,11 @@
 //! The messages exchanged by the Server and the Clients, and their wire format.
 //!
-//! Every datagram is one packet: an 8-byte header, then the message body.
-//! All integers are little-endian; coordinates are an entity's top-left
-//! corner, in pixels, as i16.
+//! Every datagram is one packet: a 12-byte header, the message body, then the
+//! Announcements it carries on the reliable channel. All integers are
+//! little-endian; coordinates are an entity's top-left corner, in pixels, as i16.
 //!
-//!     header        u16 protocol id ("RT"), u8 version, u8 message type, u32 sequence
+//!     header        u16 protocol id ("RT"), u8 version, u8 message type,
+//!                   u16 sequence, u16 ack, u32 ack bits (the Engine's reliable.Header)
 //!     connect       u8 padding (0)                                   Client -> Server
 //!     accept        u8 Player index                                  Server -> Client
 //!     refusal       u8 reason                                        Server -> Client
@@ -17,10 +18,15 @@
 //!                   Pods              (u8 id, i16 x, i16 y)
 //!                   Enemy Projectiles (u8 id, i16 x, i16 y)          Server -> Client
 //!     disconnect    (empty)                                          Client -> Server
-//!     announcement  u32 Server Tick, u8 kind, then the kind's body   Server -> Client
+//!     reliable      u8 count, then count x (u16 id, Announcement)    after every body
+//!     Announcement  u32 Server Tick, u8 kind, then the kind's body
 //!
-//! The sequence counts the datagrams sent by each peer; receivers use it to
-//! ignore datagrams that arrive out of order.
+//! The header's sequence counts the datagrams each end of a Connection sends,
+//! and acknowledges the latest one received and the 32 before it. The
+//! Server's Announcements ride on its datagrams until acknowledged, numbered
+//! so that each is handed over once, in order (ADR 0002). A Client's
+//! datagrams carry none; it only acknowledges. Before a Connection exists
+//! (connect, refusal), the header's last three fields are 0.
 //!
 //! No message has a hand-written encoder or decoder: the Engine's
 //! `ByteWriter.write` and `ByteReader.read` derive them from the types below
@@ -31,6 +37,7 @@
 const std = @import("std");
 const bytes = @import("engine_headless").bytes;
 const net = @import("engine_headless").net;
+const reliable = @import("engine_headless").reliable;
 const World = @import("world.zig").World;
 const ByteReader = bytes.ByteReader;
 const ByteWriter = bytes.ByteWriter;
@@ -49,7 +56,6 @@ pub const MessageType = enum(u8) {
     input,
     snapshot,
     disconnect,
-    announcement,
 };
 
 /// Something a Player can ask their Ship to do.
@@ -308,7 +314,7 @@ pub const ShipDestroyed = struct {
 };
 
 /// Something that happened in a Match that every Player must learn of.
-/// Unlike a Snapshot, it is meant to be delivered for certain.
+/// Unlike a Snapshot, it is delivered for certain, on the reliable channel.
 pub const Announcement = struct {
     /// The Server Tick it happened at: a Client drops the visual ones that
     /// arrive too late to show.
@@ -344,6 +350,61 @@ pub const Announcement = struct {
     }
 };
 
+/// An Announcement with its number on the reliable channel.
+pub const Numbered = reliable.Numbered(Announcement);
+
+/// The bytes of the largest Announcement, with its number.
+const max_numbered_size = size: {
+    var largest = 0;
+    for (@typeInfo(Announcement.Event).@"union".fields) |field| largest = @max(largest, bytes.wireSize(field.type));
+    break :size bytes.wireSize(u16) + bytes.wireSize(u32) + bytes.wireSize(u8) + largest;
+};
+
+/// Announcements one datagram can carry, beside the largest Snapshot.
+pub const max_announcements = (max_datagram_size - Snapshot.max_wire_size - 1) / max_numbered_size;
+
+comptime {
+    if (max_announcements < 8) @compileError("too little room for Announcements beside a full Snapshot");
+}
+
+/// The Announcements a packet carries, oldest first.
+pub const Announcements = struct {
+    /// Zig has no private fields: only `add` keeps this at most `max_announcements`.
+    len: u8 = 0,
+    entries: [max_announcements]Numbered = undefined,
+
+    /// Adds an Announcement; any beyond `max_announcements` are left out.
+    pub fn add(list: *Announcements, entry: Numbered) void {
+        if (list.len >= max_announcements) return;
+        list.entries[list.len] = entry;
+        list.len += 1;
+    }
+
+    pub fn slice(list: *const Announcements) []const Numbered {
+        return list.entries[0..@min(list.len, max_announcements)];
+    }
+
+    pub fn writeTo(list: Announcements, out: *ByteWriter) void {
+        const entries = list.slice();
+        out.int(u8, @intCast(entries.len));
+        for (entries) |entry| {
+            out.int(u16, entry.id);
+            out.write(entry.message);
+        }
+    }
+
+    pub fn readFrom(in: *ByteReader) bytes.ReadError!Announcements {
+        var list: Announcements = .{};
+        const count = try in.int(u8);
+        if (count > max_announcements) return error.BadValue;
+        for (0..count) |_| {
+            const id = try in.int(u16);
+            list.add(.{ .id = id, .message = try in.read(Announcement) });
+        }
+        return list;
+    }
+};
+
 pub const Message = union(MessageType) {
     connect: Connect,
     accept: PlayerId,
@@ -351,12 +412,13 @@ pub const Message = union(MessageType) {
     input: Input,
     snapshot: Snapshot,
     disconnect,
-    announcement: Announcement,
 };
 
 pub const Packet = struct {
-    sequence: u32,
+    /// The reliable channel's header; all 0 outside a Connection.
+    link: reliable.Header = .{ .sequence = 0, .ack = 0, .ack_bits = 0 },
     message: Message,
+    announcements: Announcements = .{},
 };
 
 /// Why a datagram is not a packet.
@@ -397,7 +459,7 @@ const Header = struct {
     protocol_id: u16,
     version: u8,
     kind: u8,
-    sequence: u32,
+    link: reliable.Header,
 };
 
 /// An encoded packet, held in place: encoding never allocates.
@@ -417,12 +479,13 @@ pub fn encode(packet: Packet) Encoded {
         .protocol_id = protocol_id,
         .version = protocol_version,
         .kind = @intFromEnum(packet.message),
-        .sequence = packet.sequence,
+        .link = packet.link,
     });
     switch (packet.message) {
         inline else => |body| out.write(body),
     }
-    // The largest message is a Snapshot, which always fits: a programming error.
+    out.write(packet.announcements);
+    // A full Snapshot and `max_announcements` always fit: a programming error.
     if (!out.ok) @panic("packet does not fit in a datagram");
     encoded.len = out.written;
     return encoded;
@@ -445,24 +508,42 @@ pub fn decode(datagram: []const u8) DecodeError!Packet {
             try in.read(@FieldType(Message, @tagName(tag))),
         ),
     };
+    const announcements = try in.read(Announcements);
     if (in.remaining() != 0) return error.TrailingBytes;
-    return .{ .sequence = header.sequence, .message = message };
+    return .{ .link = header.link, .message = message, .announcements = announcements };
 }
 
 const testing = std.testing;
 
-fn withHeader(comptime kind: u8, comptime body: []const u8) []const u8 {
-    return .{ 'R', 'T', 1, kind, 0x04, 0x03, 0x02, 0x01 } ++ body;
+/// The header of a packet of type `kind`: sequence 0x0102, ack 0x0304, ack
+/// bits 0x08070605.
+fn headerOf(comptime kind: u8) [12]u8 {
+    return .{ 'R', 'T', 1, kind, 0x02, 0x01, 0x04, 0x03, 0x05, 0x06, 0x07, 0x08 };
 }
 
+/// A packet of type `kind` carrying no Announcement.
+fn withHeader(comptime kind: u8, comptime body: []const u8) []const u8 {
+    const packet = comptime headerOf(kind) ++ body[0..body.len].* ++ [_]u8{0};
+    return &packet;
+}
+
+const test_link: reliable.Header = .{ .sequence = 0x0102, .ack = 0x0304, .ack_bits = 0x08070605 };
+
 fn expectBytes(expected: []const u8, message: Message) !void {
-    const encoded = encode(.{ .sequence = 0x01020304, .message = message });
+    const encoded = encode(.{ .link = test_link, .message = message });
     try testing.expectEqualSlices(u8, expected, encoded.bytes());
 }
 
+fn expectAnnouncement(comptime body: []const u8, event: Announcement.Event) !void {
+    var packet: Packet = .{ .link = test_link, .message = .disconnect };
+    packet.announcements.add(.{ .id = 0x0A09, .message = .{ .tick = 42, .event = event } });
+    const expected = headerOf(6) ++ [_]u8{ 1, 0x09, 0x0A, 0x2A, 0, 0, 0 } ++ body;
+    try testing.expectEqualSlices(u8, expected, encode(packet).bytes());
+}
+
 test "the layout matches the wire format" {
-    // An accept for Player 2, sequence 0x01020304.
-    try expectBytes(&.{ 0x52, 0x54, 0x01, 0x02, 0x04, 0x03, 0x02, 0x01, 0x02 }, .{ .accept = .{ .player = 2 } });
+    // An accept for Player 2: the header, the body, and no Announcement.
+    try expectBytes(&.{ 0x52, 0x54, 0x01, 0x02, 0x02, 0x01, 0x04, 0x03, 0x05, 0x06, 0x07, 0x08, 0x02, 0x00 }, .{ .accept = .{ .player = 2 } });
     try expectBytes(withHeader(1, &.{0}), .{ .connect = .{} });
     try expectBytes(withHeader(3, &.{1}), .{ .refusal = .{ .reason = .match_full } });
     try expectBytes(withHeader(3, &.{2}), .{ .refusal = .{ .reason = .already_started } });
@@ -518,29 +599,31 @@ test "a Snapshot's layout: header, then one section per kind, in order" {
     try expectBytes(withHeader(5, &.{ 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 }), .{ .snapshot = .{ .phase = .playing } });
 }
 
-test "an Announcement's layout: Tick, kind, then the kind's body" {
-    const tick = [_]u8{ 0x2A, 0, 0, 0 };
-    try expectBytes(withHeader(7, &tick ++ .{ 1, 2 }), .{ .announcement = .{ .tick = 42, .event = .{ .player_joined = .{ .player = 2 } } } });
-    try expectBytes(withHeader(7, &tick ++ .{ 2, 0 }), .{ .announcement = .{ .tick = 42, .event = .{ .player_left = .{ .player = 0 } } } });
-    try expectBytes(withHeader(7, &tick ++ .{ 3, 3 }), .{ .announcement = .{ .tick = 42, .event = .{ .player_timed_out = .{ .player = 3 } } } });
-    try expectBytes(withHeader(7, &tick ++ .{ 4, 0x10, 0x02, 0xFB, 0xFF }), .{ .announcement = .{ .tick = 42, .event = .{ .explosion = .{ .x = 0x0210, .y = -5 } } } });
-    try expectBytes(withHeader(7, &tick ++ .{ 5, 1, 64, 0, 90, 0 }), .{ .announcement = .{ .tick = 42, .event = .{ .ship_destroyed = .{ .player = 1, .x = 64, .y = 90 } } } });
-    try expectBytes(withHeader(7, &tick ++ .{6}), .{ .announcement = .{ .tick = 42, .event = .game_over } });
+test "an Announcement's layout: id, Tick, kind, then the kind's body" {
+    try expectAnnouncement(&.{ 1, 2 }, .{ .player_joined = .{ .player = 2 } });
+    try expectAnnouncement(&.{ 2, 0 }, .{ .player_left = .{ .player = 0 } });
+    try expectAnnouncement(&.{ 3, 3 }, .{ .player_timed_out = .{ .player = 3 } });
+    try expectAnnouncement(&.{ 4, 0x10, 0x02, 0xFB, 0xFF }, .{ .explosion = .{ .x = 0x0210, .y = -5 } });
+    try expectAnnouncement(&.{ 5, 1, 64, 0, 90, 0 }, .{ .ship_destroyed = .{ .player = 1, .x = 64, .y = 90 } });
+    try expectAnnouncement(&.{6}, .game_over);
 }
 
-test "a Snapshot of full tables fits in one datagram" {
-    // 22 bytes of headers and counts, 4 Ships of 7 bytes, and 160 other
+test "a full Snapshot and the most Announcements fit in one datagram" {
+    // 26 bytes of headers and counts, 4 Ships of 7 bytes, and 160 other
     // entities of 5 bytes.
-    try testing.expectEqual(22 + 4 * 7 + (32 + 32 + 32 + 64) * 5, Snapshot.max_wire_size);
-    var full: Snapshot = .{};
+    try testing.expectEqual(26 + 4 * 7 + (32 + 32 + 32 + 64) * 5, Snapshot.max_wire_size);
+    var packet: Packet = .{ .message = .{ .snapshot = .{} } };
     inline for (Snapshot.sections) |name| {
-        const section = &@field(full, name);
+        const section = &@field(packet.message.snapshot, name);
         for (0..@TypeOf(section.*).capacity) |i| {
             if (comptime std.mem.eql(u8, name, "ships")) section.add(.{ .player = @intCast(i) }) else section.add(.{ .id = @intCast(i) });
         }
     }
-    const encoded = encode(.{ .sequence = 1, .message = .{ .snapshot = full } });
-    try testing.expectEqual(Snapshot.max_wire_size, encoded.len);
+    for (0..max_announcements) |i| packet.announcements.add(.{ .id = @intCast(i), .message = .{ .event = .{ .ship_destroyed = .{ .player = 0, .x = 0, .y = 0 } } } });
+    const encoded = encode(packet);
+    try testing.expectEqual(Snapshot.max_wire_size + 1 + max_announcements * 12, encoded.len);
+    try testing.expect(encoded.len <= max_datagram_size);
+    try testing.expectEqual(28, max_announcements);
 }
 
 test "coordinates round, and stay within an i16" {
@@ -560,54 +643,68 @@ test "Actions hold one bit per Action held" {
 }
 
 test "decodes what it encodes" {
-    var snapshot: Snapshot = .{ .tick = std.math.maxInt(u32), .phase = .game_over, .phase_ends = 7 };
-    snapshot.ships.add(.{});
-    snapshot.pods.add(.{ .id = 255, .x = std.math.minInt(i16), .y = std.math.maxInt(i16) });
     const messages = [_]Message{
         .{ .connect = .{} },
         .{ .accept = .{ .player = 3 } },
         .{ .refusal = .{ .reason = .already_started } },
         .{ .input = .{} },
         .disconnect,
-        .{ .announcement = .{ .tick = 1, .event = .{ .ship_destroyed = .{ .player = 3, .x = -1, .y = 2 } } } },
-        .{ .announcement = .{ .tick = 2, .event = .game_over } },
     };
     for (messages) |message| {
-        const packet: Packet = .{ .sequence = 42, .message = message };
-        try testing.expectEqualDeep(packet, try decode(encode(packet).bytes()));
+        const packet: Packet = .{ .link = test_link, .message = message };
+        const decoded = try decode(encode(packet).bytes());
+        try testing.expectEqualDeep(packet.link, decoded.link);
+        try testing.expectEqualDeep(packet.message, decoded.message);
+        try testing.expectEqual(0, decoded.announcements.len);
     }
-    // A Snapshot's unused slots are undefined: compare what is present.
-    const decoded = try decode(encode(.{ .sequence = 42, .message = .{ .snapshot = snapshot } }).bytes());
+    // A Snapshot's and a list's unused slots are undefined: compare what is present.
+    var snapshot: Snapshot = .{ .tick = std.math.maxInt(u32), .phase = .game_over, .phase_ends = 7 };
+    snapshot.ships.add(.{});
+    snapshot.pods.add(.{ .id = 255, .x = std.math.minInt(i16), .y = std.math.maxInt(i16) });
+    var packet: Packet = .{ .link = test_link, .message = .{ .snapshot = snapshot } };
+    packet.announcements.add(.{ .id = 65535, .message = .{ .tick = 1, .event = .{ .ship_destroyed = .{ .player = 3, .x = -1, .y = 2 } } } });
+    packet.announcements.add(.{ .id = 0, .message = .{ .tick = 2, .event = .game_over } });
+    const decoded = try decode(encode(packet).bytes());
     try testing.expect(snapshot.eql(&decoded.message.snapshot));
+    try testing.expectEqualDeep(packet.announcements.slice(), decoded.announcements.slice());
 }
 
 test "rejects malformed datagrams" {
     const too_long: [max_datagram_size + 1]u8 = @splat(0);
     try testing.expectError(error.TooLong, decode(&too_long));
     try testing.expectError(error.Truncated, decode(&.{}));
-    try testing.expectError(error.Truncated, decode(withHeader(6, &.{})[0..7]));
-    try testing.expectError(error.BadProtocol, decode(&.{ 'R', 'X', 1, 6, 0, 0, 0, 0 }));
-    try testing.expectError(error.BadVersion, decode(&.{ 'R', 'T', 2, 6, 0, 0, 0, 0 }));
+    try testing.expectError(error.Truncated, decode(headerOf(6)[0..11]));
+    try testing.expectError(error.BadProtocol, decode(&[_]u8{ 'R', 'X', 1, 6 } ++ [_]u8{0} ** 9));
+    try testing.expectError(error.BadVersion, decode(&[_]u8{ 'R', 'T', 2, 6 } ++ [_]u8{0} ** 9));
     try testing.expectError(error.UnknownType, decode(withHeader(0, &.{})));
-    try testing.expectError(error.UnknownType, decode(withHeader(8, &.{})));
-    try testing.expectError(error.Truncated, decode(withHeader(2, &.{})));
+    try testing.expectError(error.UnknownType, decode(withHeader(7, &.{})));
+    try testing.expectError(error.Truncated, decode(&headerOf(2)));
     try testing.expectError(error.BadValue, decode(withHeader(2, &.{4})));
     try testing.expectError(error.BadValue, decode(withHeader(3, &.{3})));
-    try testing.expectError(error.TrailingBytes, decode(withHeader(6, &.{0})));
+    // The reliable section: missing, or followed by more bytes.
+    try testing.expectError(error.Truncated, decode(&headerOf(6)));
+    try testing.expectError(error.TrailingBytes, decode(&headerOf(6) ++ .{ 0, 0 }));
     // Connect: unpadded, or padded with anything but zero.
-    try testing.expectError(error.Truncated, decode(withHeader(1, &.{})));
+    try testing.expectError(error.Truncated, decode(&headerOf(1)));
     try testing.expectError(error.BadValue, decode(withHeader(1, &.{1})));
     // Input: unknown Action bits, ticks out of order, and truncation first.
     const unknown_action = [_]u8{ 0, 0, 0, 0, 0x20 } ++ [_]u8{0} ** 10;
     try testing.expectError(error.BadValue, decode(withHeader(4, &unknown_action)));
-    try testing.expectError(error.Truncated, decode(withHeader(4, unknown_action[0..14])));
+    try testing.expectError(error.Truncated, decode(&headerOf(4) ++ unknown_action[0..14]));
     const out_of_order = [_]u8{ 0, 0, 0, 0, 0, 1 } ++ [_]u8{0} ** 9;
     try testing.expectError(error.BadValue, decode(withHeader(4, &out_of_order)));
 }
 
-/// A Snapshot body: Tick 0, playing, ending at 0, then `sections`.
+/// A Snapshot packet: Tick 0, playing, ending at 0, then `sections`, then no
+/// Announcement.
 fn snapshotWith(comptime sections: []const u8) []const u8 {
     return withHeader(5, &[_]u8{ 0, 0, 0, 0, 2, 0, 0, 0, 0 } ++ sections);
+}
+
+/// A Snapshot packet cut short inside `sections`.
+fn snapshotCut(comptime sections: []const u8) []const u8 {
+    const packet = comptime headerOf(5) ++ [_]u8{ 0, 0, 0, 0, 2, 0, 0, 0, 0 } ++ sections[0..sections.len].*;
+    return &packet;
 }
 
 test "rejects malformed Snapshots" {
@@ -621,23 +718,31 @@ test "rejects malformed Snapshots" {
     try testing.expectError(error.BadValue, decode(snapshotWith(&.{ 1, 4, 0, 0, 0, 0, 1, 0 })));
     const twice = [_]u8{ 2, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0 };
     try testing.expectError(error.BadValue, decode(snapshotWith(&twice)));
-    try testing.expectError(error.Truncated, decode(snapshotWith(twice[0..12])));
+    try testing.expectError(error.Truncated, decode(snapshotCut(twice[0..12])));
     try testing.expectError(error.BadValue, decode(snapshotWith(&.{ 1, 0, 0, 0, 0, 0, 0, 0 })));
     try testing.expectError(error.BadValue, decode(snapshotWith(&.{ 1, 0, 0, 0, 0, 0, 1, 2 })));
     // More Darts than their table holds, and the same Dart twice.
     try testing.expectError(error.BadValue, decode(snapshotWith(&.{ 0, 0, 33 })));
     try testing.expectError(error.BadValue, decode(snapshotWith(&.{ 0, 0, 2, 7, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0 })));
-    // A section missing, or bytes after the last one.
-    try testing.expectError(error.Truncated, decode(snapshotWith(no_entities[0..4])));
-    try testing.expectError(error.TrailingBytes, decode(snapshotWith(&no_entities ++ .{0})));
+    // A section missing.
+    try testing.expectError(error.Truncated, decode(snapshotCut(no_entities[0..4])));
+}
+
+/// A disconnect carrying `reliable`, the reliable section.
+fn carrying(comptime section: []const u8) []const u8 {
+    const packet = comptime headerOf(6) ++ section[0..section.len].*;
+    return &packet;
 }
 
 test "rejects malformed Announcements" {
-    try testing.expectError(error.BadValue, decode(withHeader(7, &.{ 0, 0, 0, 0, 0 })));
-    try testing.expectError(error.BadValue, decode(withHeader(7, &.{ 0, 0, 0, 0, 7 })));
-    try testing.expectError(error.BadValue, decode(withHeader(7, &.{ 0, 0, 0, 0, 2, 4 })));
-    try testing.expectError(error.BadValue, decode(withHeader(7, &.{ 0, 0, 0, 0, 5, 4, 0, 0, 0, 0 })));
-    try testing.expectError(error.Truncated, decode(withHeader(7, &.{ 0, 0, 0, 0, 4, 0, 0, 0 })));
-    try testing.expectError(error.Truncated, decode(withHeader(7, &.{ 0, 0, 0 })));
-    try testing.expectError(error.TrailingBytes, decode(withHeader(7, &.{ 0, 0, 0, 0, 6, 0 })));
+    // More than a datagram carries.
+    try testing.expectError(error.BadValue, decode(carrying(&.{max_announcements + 1})));
+    // Unknown kinds, a Player out of range, and truncation.
+    try testing.expectError(error.BadValue, decode(carrying(&.{ 1, 0, 0, 0, 0, 0, 0, 0 })));
+    try testing.expectError(error.BadValue, decode(carrying(&.{ 1, 0, 0, 0, 0, 0, 0, 7 })));
+    try testing.expectError(error.BadValue, decode(carrying(&.{ 1, 0, 0, 0, 0, 0, 0, 2, 4 })));
+    try testing.expectError(error.BadValue, decode(carrying(&.{ 1, 0, 0, 0, 0, 0, 0, 5, 4, 0, 0, 0, 0 })));
+    try testing.expectError(error.Truncated, decode(carrying(&.{ 1, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0 })));
+    try testing.expectError(error.Truncated, decode(carrying(&.{ 2, 0, 0, 0, 0, 0, 0, 6 })));
+    try testing.expectError(error.TrailingBytes, decode(carrying(&.{ 1, 0, 0, 0, 0, 0, 0, 6, 0 })));
 }

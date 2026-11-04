@@ -13,6 +13,7 @@ const engine = @import("engine_client");
 const engine_headless = @import("engine_headless");
 const net = engine_headless.net;
 const FixedStep = engine_headless.time.FixedStep;
+const Channel = engine_headless.reliable.Channel(protocol.Announcement);
 const game = @import("game");
 const protocol = game.protocol;
 const Actions = protocol.Actions;
@@ -81,30 +82,50 @@ fn heldActions(window: *const engine.Window, settings: *const Settings) Actions 
     return .of(window.actionsHeld(protocol.Action, settings.bindings));
 }
 
-/// The Client's end of the conversation with the Server: numbers the
-/// datagrams it sends, and drops the ones that arrive out of order.
+/// The Client's end of the conversation with the Server: a reliable channel
+/// that acknowledges every datagram and hands the Announcements over once
+/// each, in order, and the newest Snapshot's Tick, to drop the older ones.
 const ServerLink = struct {
+    io: Io,
     transport: *net.UdpTransport,
     server: net.Endpoint,
-    sequence: u32 = 0,
-    server_sequence: u32 = 0,
+    channel: Channel = .{},
+    /// The Tick of the newest Snapshot shown; null before the first.
+    newest: ?u32 = null,
 
     fn send(link: *ServerLink, message: protocol.Message) void {
-        link.sequence +%= 1;
-        const encoded = protocol.encode(.{ .sequence = link.sequence, .message = message });
+        var none: [0]protocol.Numbered = .{};
+        const out = link.channel.outgoing(engine_headless.time.timestamp(link.io), &none);
+        const encoded = protocol.encode(.{ .link = out.header, .message = message });
         link.transport.send(link.server, encoded.bytes());
     }
 
-    /// The next message from the Server, oldest first; null once none is left.
+    /// The next message from the Server, oldest first; null once none is
+    /// left. The Announcements a datagram carries go to `channel`, before
+    /// its message: call `channel.next` first.
     fn receive(link: *ServerLink) ?protocol.Message {
         while (link.transport.receive()) |datagram| {
             if (!datagram.from.eql(link.server)) continue;
             const packet = protocol.decode(datagram.bytes()) catch continue; // malformed
-            if (packet.sequence <= link.server_sequence) continue; // overtaken by a newer datagram
-            link.server_sequence = packet.sequence;
+            link.channel.incoming(engine_headless.time.timestamp(link.io), packet.link, packet.announcements.slice());
+            if (packet.message == .snapshot) {
+                const tick = packet.message.snapshot.tick;
+                if (link.newest) |newest| {
+                    // Overtaken by a newer Snapshot, across the Tick counter wrapping.
+                    if (tick -% newest -% 1 >= 1 << 31) continue;
+                }
+                link.newest = tick;
+            }
             return packet.message;
         }
         return null;
+    }
+
+    /// Back to how it was before the first connect: the Server forgot the
+    /// Connection, and the next one starts afresh.
+    fn reset(link: *ServerLink) void {
+        link.channel = .{};
+        link.newest = null;
     }
 };
 
@@ -120,7 +141,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     var source: Source = if (options.demo) |seed| .{ .demo = .init(seed) } else server: {
         const server = net.resolve(io, options.host, options.port) orelse return error.CannotResolve;
         transport = try net.UdpTransport.open(gpa, io, 0);
-        break :server .{ .server = .{ .transport = transport.?, .server = server } };
+        break :server .{ .server = .{ .io = io, .transport = transport.?, .server = server } };
     };
 
     // Released in the reverse order, by the defers: the sound before the
@@ -158,7 +179,14 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     while (!window.shouldClose()) {
         frame_count += 1;
         if (source == .server) {
-            while (source.server.receive()) |message| {
+            const link = &source.server;
+            while (link.receive()) |message| {
+                // The Announcements, before the Scene the entities vanished from.
+                while (link.channel.next()) |announcement| {
+                    const was = me;
+                    announce(io, &view, &me, announcement);
+                    if (was != null and me == null) link.reset(); // dropped by the Server
+                }
                 switch (message) {
                     .accept => |accepted| {
                         if (me != accepted.player) log(io, "Joined the Match as Player {d}", .{accepted.player + 1});
@@ -173,7 +201,6 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                         },
                     },
                     .snapshot => |snapshot| view.show(.fromSnapshot(&snapshot)),
-                    .announcement => |announcement| announce(io, &view, &me, announcement),
                     // Messages only Clients send.
                     .connect, .input, .disconnect => {},
                 }

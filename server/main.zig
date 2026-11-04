@@ -3,8 +3,9 @@
 //!
 //! Two threads: the Engine's network thread receives datagrams into the
 //! transport's inbox, and the main thread runs the 60 Hz Tick loop, which
-//! drains the inbox, advances the Match, and sends every Player what the Tick
-//! announced, then a snapshot.
+//! drains the inbox, advances the Match, queues what the Tick announced on
+//! each Player's reliable channel, and every K Ticks sends every Player a
+//! snapshot, which carries the Announcements not acknowledged yet.
 //! Logs go to stderr, unbuffered, so they show up at once even when redirected.
 
 const std = @import("std");
@@ -13,12 +14,13 @@ const engine = @import("engine_headless");
 const game = @import("game");
 const net = engine.net;
 const FixedStep = engine.time.FixedStep;
+const Channel = engine.reliable.Channel(protocol.Announcement);
 const protocol = game.protocol;
 const Match = game.match.Match;
 const tick_rate = game.match.tick_rate;
 
 const usage =
-    \\usage: r-type_server [--port <port>] [--seed <seed>] [--join-window <seconds>]
+    \\usage: r-type_server [--port <port>] [--seed <seed>] [--snapshot-every <ticks>] [--join-window <seconds>]
     \\                     [--hit-points <n>] [--invulnerability <seconds>] [--game-over-pause <seconds>]
 ;
 
@@ -32,6 +34,9 @@ const Options = struct {
     port: u16 = 4242,
     /// Random from the OS when not given.
     seed: ?u64 = null,
+    /// K: a snapshot every K Ticks (ADR 0002). A larger K saves bandwidth,
+    /// and shows as jerkier movement.
+    snapshot_every: u8 = 1,
     /// Every field but the seed, which `main` fills in.
     settings: game.match.Settings = .{ .seed = 0 },
 };
@@ -48,6 +53,9 @@ fn parseOptions(args: []const [:0]const u8) ?Options {
             options.port = std.fmt.parseInt(u16, value, 10) catch return null;
         } else if (std.mem.eql(u8, name, "--seed")) {
             options.seed = std.fmt.parseInt(u64, value, 10) catch return null;
+        } else if (std.mem.eql(u8, name, "--snapshot-every")) {
+            options.snapshot_every = std.fmt.parseInt(u8, value, 10) catch return null;
+            if (options.snapshot_every == 0) return null;
         } else if (std.mem.eql(u8, name, "--join-window")) {
             settings.join_window = secondsToTicks(u32, value) orelse return null;
         } else if (std.mem.eql(u8, name, "--hit-points")) {
@@ -75,11 +83,15 @@ const Server = struct {
     io: Io,
     transport: *net.UdpTransport,
     match: Match,
-    /// Sequence number of the last datagram sent.
-    sequence: u32 = 0,
+    snapshot_every: u8,
+    /// Each Player's reliable channel, by Player index; null outside a Connection.
+    channels: [protocol.max_players]?Channel = @splat(null),
     received: usize = 0,
     malformed: usize = 0,
     ignored: usize = 0,
+    bytes_sent: u64 = 0,
+    /// Announcements resent on channels since closed; open ones count their own.
+    resent: u64 = 0,
 
     fn tick(s: *Server) void {
         // At most one inbox's worth per Tick, so a flood cannot stall the loop.
@@ -92,9 +104,9 @@ const Server = struct {
         var dropped = events.timed_out.iterator(.{});
         while (dropped.next()) |player| {
             log(s.io, "Tick {d}: Player {d} timed out", .{ s.match.tick, player + 1 });
+            s.close(@intCast(player));
             s.announce(.{ .player_timed_out = .{ .player = @intCast(player) } });
         }
-        // Sent without a delivery guarantee until the reliable channel (#28).
         for (events.explosionSlice()) |at| {
             s.announce(.{ .explosion = .{ .x = protocol.coordinate(at.x), .y = protocol.coordinate(at.y) } });
         }
@@ -106,7 +118,12 @@ const Server = struct {
             log(s.io, "Tick {d}: game over", .{s.match.tick});
             s.announce(.game_over);
         }
-        s.tellEveryone(.{ .snapshot = s.match.snapshot() });
+        if (s.match.tick % s.snapshot_every == 0) {
+            const snapshot = s.match.snapshot();
+            for (0..protocol.max_players) |player| {
+                if (s.channels[player] != null) s.send(@intCast(player), .{ .snapshot = snapshot });
+            }
+        }
         if (s.match.tick % (5 * tick_rate) == 0) s.report();
     }
 
@@ -117,8 +134,12 @@ const Server = struct {
             return;
         };
         const player = s.match.find(datagram.from);
+        // Only acknowledgements: a Client sends no Announcements.
+        if (player) |p| {
+            if (s.channels[p]) |*channel| channel.incoming(engine.time.timestamp(s.io), packet.link, &.{});
+        }
         switch (packet.message) {
-            .connect => s.connect(datagram.from),
+            .connect => s.connect(datagram.from, packet.link),
             .input => |input| {
                 if (player) |p| s.match.receive(p, input) else s.ignored += 1;
             },
@@ -126,59 +147,95 @@ const Server = struct {
                 if (player) |p| s.leave(p) else s.ignored += 1;
             },
             // Messages only the Server sends.
-            .accept, .refusal, .snapshot, .announcement => s.ignored += 1,
+            .accept, .refusal, .snapshot => s.ignored += 1,
         }
     }
 
-    fn connect(s: *Server, peer: net.Endpoint) void {
+    fn connect(s: *Server, peer: net.Endpoint, link: engine.reliable.Header) void {
         const known = s.match.find(peer) != null;
         const player = s.match.join(peer) catch |err| {
-            s.send(peer, .{ .refusal = .{ .reason = switch (err) {
+            s.sendOutside(peer, .{ .refusal = .{ .reason = switch (err) {
                 error.MatchFull => .match_full,
                 error.AlreadyStarted => .already_started,
             } } });
             if (!known) log(s.io, "Tick {d}: refused {f}: {t}", .{ s.match.tick, peer, err });
             return;
         };
-        s.send(peer, .{ .accept = .{ .player = player } });
         if (!known) {
+            s.channels[player] = .{};
+            s.channels[player].?.incoming(engine.time.timestamp(s.io), link, &.{});
             log(s.io, "Tick {d}: Player {d} joined from {f}", .{ s.match.tick, player + 1, peer });
             s.announce(.{ .player_joined = .{ .player = player } });
         }
+        s.send(player, .{ .accept = .{ .player = player } });
     }
 
     fn leave(s: *Server, player: u8) void {
         s.match.leave(player);
+        s.close(player);
         log(s.io, "Tick {d}: Player {d} left", .{ s.match.tick, player + 1 });
         s.announce(.{ .player_left = .{ .player = player } });
     }
 
-    fn send(s: *Server, to: net.Endpoint, message: protocol.Message) void {
-        s.sequence +%= 1;
-        const encoded = protocol.encode(.{ .sequence = s.sequence, .message = message });
-        s.transport.send(to, encoded.bytes());
+    fn close(s: *Server, player: u8) void {
+        const channel = &(s.channels[player] orelse return);
+        s.resent += channel.resent;
+        s.channels[player] = null;
     }
 
-    /// Tells every Player of something that happened this Tick.
+    /// Sends a Player `message`, with the Announcements their channel has
+    /// to send again or for the first time.
+    fn send(s: *Server, player: u8, message: protocol.Message) void {
+        const channel = &(s.channels[player] orelse return);
+        const peer = (s.match.players[player] orelse return).peer;
+        var room: [protocol.max_announcements]protocol.Numbered = undefined;
+        const out = channel.outgoing(engine.time.timestamp(s.io), &room);
+        var packet: protocol.Packet = .{ .link = out.header, .message = message };
+        for (out.messages) |entry| packet.announcements.add(entry);
+        s.transmit(peer, &packet);
+    }
+
+    /// Answers a peer that has no Connection.
+    fn sendOutside(s: *Server, peer: net.Endpoint, message: protocol.Message) void {
+        s.transmit(peer, &.{ .message = message });
+    }
+
+    fn transmit(s: *Server, peer: net.Endpoint, packet: *const protocol.Packet) void {
+        const encoded = protocol.encode(packet.*);
+        s.bytes_sent += encoded.len;
+        s.transport.send(peer, encoded.bytes());
+    }
+
+    /// Tells every Player of something that happened this Tick: it goes out
+    /// with their next datagrams until they acknowledge it. A Player whose
+    /// channel is full has stopped acknowledging, and times out.
     fn announce(s: *Server, event: protocol.Announcement.Event) void {
-        s.tellEveryone(.{ .announcement = .{ .tick = s.match.tick, .event = event } });
-    }
-
-    fn tellEveryone(s: *Server, message: protocol.Message) void {
-        for (s.match.players) |slot| {
-            const player = slot orelse continue;
-            s.send(player.peer, message);
+        const announcement: protocol.Announcement = .{ .tick = s.match.tick, .event = event };
+        for (0..protocol.max_players) |index| {
+            const player: u8 = @intCast(index);
+            const channel = &(s.channels[player] orelse continue);
+            channel.send(announcement) catch {
+                log(s.io, "Tick {d}: Player {d} timed out: {d} Announcements unacknowledged", .{ s.match.tick, player + 1, engine.reliable.window });
+                s.match.leave(player);
+                s.close(player);
+                // Told to the Players left; at most once per Player, so this ends.
+                s.announce(.{ .player_timed_out = .{ .player = player } });
+            };
         }
     }
 
     fn report(s: *const Server) void {
-        log(s.io, "Tick {d}: {d} Players, {d} datagrams received, {d} malformed, {d} ignored, {d} dropped by the transport", .{
+        var resent = s.resent;
+        for (s.channels) |slot| resent += if (slot) |channel| channel.resent else 0;
+        log(s.io, "Tick {d}: {d} Players, {d} datagrams received, {d} malformed, {d} ignored, {d} dropped by the transport, {d} bytes sent, {d} Announcements resent", .{
             s.match.tick,
             s.match.playerCount(),
             s.received,
             s.malformed,
             s.ignored,
             s.transport.droppedCount(),
+            s.bytes_sent,
+            resent,
         });
     }
 };
@@ -202,7 +259,7 @@ pub fn main(init: std.process.Init) !u8 {
         io.random(std.mem.asBytes(&seed));
         break :seed seed;
     };
-    var server: Server = .{ .io = io, .transport = transport, .match = .init(settings) };
+    var server: Server = .{ .io = io, .transport = transport, .match = .init(settings), .snapshot_every = options.snapshot_every };
     log(io, "r-type_server: listening on UDP port {d}, {d} Ticks per second", .{ transport.localPort(), tick_rate });
 
     var ticks: FixedStep = .init(io, .fromNanoseconds(std.time.ns_per_s / tick_rate));
@@ -217,6 +274,7 @@ test "options default to #2's settings" {
     const options = parseOptions(&.{}).?;
     try testing.expectEqual(4242, options.port);
     try testing.expectEqual(null, options.seed);
+    try testing.expectEqual(1, options.snapshot_every);
     try testing.expectEqual(5 * tick_rate, options.settings.join_window);
     try testing.expectEqual(3, options.settings.hit_points);
     try testing.expectEqual(4 * tick_rate, options.settings.invulnerability);
@@ -229,11 +287,13 @@ test "durations are read in seconds" {
     try testing.expectEqual(0, options.settings.invulnerability);
     try testing.expectEqual(42, options.seed);
     try testing.expectEqual(5, options.settings.hit_points);
+    try testing.expectEqual(4, parseOptions(&.{ "--snapshot-every", "4" }).?.snapshot_every);
 }
 
 test "bad options are refused" {
     try testing.expectEqual(null, parseOptions(&.{"--port"}));
     try testing.expectEqual(null, parseOptions(&.{ "--hit-points", "0" }));
+    try testing.expectEqual(null, parseOptions(&.{ "--snapshot-every", "0" }));
     try testing.expectEqual(null, parseOptions(&.{ "--join-window", "-1" }));
     try testing.expectEqual(null, parseOptions(&.{ "--invulnerability", "2000" })); // beyond a u16 of Ticks
     try testing.expectEqual(null, parseOptions(&.{ "--game-over-pause", "nan" }));
