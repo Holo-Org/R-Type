@@ -26,6 +26,7 @@ const Demo = demo_.Demo;
 const hud = @import("hud.zig");
 const sound = @import("sound.zig");
 const View = @import("view.zig").View;
+const scene_ = @import("scene.zig");
 
 const usage = "usage: r-type_client [--host <host>] [--port <port>] [--demo <seed>] [--script <n>] [--frames <n> [--screenshot <file.png>]]";
 
@@ -141,6 +142,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     defer view.deinit();
 
     var me: ?u8 = null; // our Player index, once accepted
+    var refused = false; // told once that the Match has already started
     var input: protocol.Input = .{};
     var tick: u32 = 0;
     var ticks: FixedStep = .init(io, .fromNanoseconds(std.time.ns_per_s / tick_rate));
@@ -162,12 +164,16 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                         if (me != accepted.player) log(io, "Joined the Match as Player {d}", .{accepted.player + 1});
                         me = accepted.player;
                     },
-                    .reject => return error.MatchFull,
-                    .snapshot => |snapshot| view.show(.fromSnapshot(&snapshot)),
-                    .player_left => |left| {
-                        log(io, "Player {d} left the Match", .{left.player + 1});
-                        if (me == left.player) me = null; // dropped by the Server: connect again
+                    .refusal => |refusal| switch (refusal.reason) {
+                        .match_full => return error.MatchFull,
+                        // Connects keep going out until a join window takes one.
+                        .already_started => if (!refused) {
+                            log(io, "The Match has already started: waiting for the next one", .{});
+                            refused = true;
+                        },
                     },
+                    .snapshot => |snapshot| view.show(.fromSnapshot(&snapshot)),
+                    .announcement => |announcement| announce(io, &view, &me, announcement),
                     // Messages only Clients send.
                     .connect, .input, .disconnect => {},
                 }
@@ -186,14 +192,14 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                 .server => |*link| if (me != null) {
                     link.send(.{ .input = input });
                 } else if (tick % (tick_rate / 2) == 1) {
-                    link.send(.connect); // twice a second, until the Server answers
+                    link.send(.{ .connect = .{} }); // twice a second, until the Server answers
                 },
                 .demo => |*demo| {
                     // The Announcements, before the Scene the entities vanished from.
                     const events = demo.step(actions);
                     for (events.explosionSlice()) |position| view.enemyDestroyed(position);
                     for (events.shipDestroyedSlice()) |destroyed| view.shipDestroyed(destroyed.position);
-                    view.show(.fromMatch(&demo.match));
+                    view.show(.fromSnapshot(&demo.match.snapshot()));
                 },
             }
         }
@@ -221,6 +227,28 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     }
 
     if (source == .server and me != null) source.server.send(.disconnect);
+}
+
+/// Visual Announcements later than this are not shown: their entity has
+/// long vanished from the screen.
+const too_late = tick_rate / 4;
+
+/// Logs what concerns the Players, and starts the effects of the visual
+/// Announcements. Comes before the Scene the entities vanished from.
+fn announce(io: Io, view: *View, me: *?u8, announcement: protocol.Announcement) void {
+    const age = view.scene.tick -% announcement.tick;
+    const late = age > too_late and age < 1 << 31; // not from a Tick ahead of the Scene
+    switch (announcement.event) {
+        .player_joined => |joined| log(io, "Player {d} joined the Match", .{joined.player + 1}),
+        .player_left, .player_timed_out => |gone| {
+            const how = if (announcement.event == .player_left) "left" else "timed out";
+            log(io, "Player {d} {s}", .{ gone.player + 1, how });
+            if (me.* == gone.player) me.* = null; // dropped by the Server: connect again
+        },
+        .explosion => |at| if (!late) view.enemyDestroyed(scene_.position(at.x, at.y)),
+        .ship_destroyed => |ship| if (!late) view.shipDestroyed(scene_.position(ship.x, ship.y)),
+        .game_over => log(io, "Game over", .{}),
+    }
 }
 
 pub fn main(init: std.process.Init) !u8 {

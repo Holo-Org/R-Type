@@ -3,8 +3,7 @@
 
 const std = @import("std");
 const ecs = @import("engine_headless").ecs;
-const protocol = @import("protocol.zig");
-const max_players = protocol.max_players;
+const max_players = @import("protocol.zig").max_players;
 
 /// An entity's top-left corner.
 pub const Position = struct { x: f32, y: f32 };
@@ -67,17 +66,6 @@ pub const World = struct {
         return w.darts.len + w.pods.len;
     }
 };
-
-// Even with every table full, a Snapshot fits in one datagram (ADR 0005):
-// checked over the tables' capacities, not over runtime budgets. The sizes
-// are the layout settled in #4; "Encode protocol v1's messages" (#26) owns it.
-comptime {
-    const header_bytes = 22; // packet header, Tick, phase, join-window Tick, one count per section
-    const entry_bytes = .{ .ships = 7, .ship_projectiles = 5, .darts = 5, .pods = 5, .enemy_projectiles = 5 };
-    var worst: usize = header_bytes;
-    for (@typeInfo(World).@"struct".fields) |table| worst += table.type.capacity * @field(entry_bytes, table.name);
-    if (worst > protocol.max_datagram_size) @compileError("a Snapshot of full tables would not fit in one datagram");
-}
 
 test "a world starts empty" {
     const w: World = .empty;

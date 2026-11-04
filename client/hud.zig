@@ -72,7 +72,7 @@ pub fn drawHeartBar(frame: *engine.Frame, players: PlayerSet, scene: *const Scen
         const ship = for (scene.ships.slice()) |ship| {
             if (ship.player == player) break ship;
         } else continue; // destroyed
-        const hit_points = ship.hit_points orelse continue; // not in today's Snapshots
+        const hit_points = ship.hit_points;
         var x: f32 = margin + 36;
         for (0..@min(hit_points, max_hearts)) |_| {
             drawHeart(frame, x, @floatFromInt(y), color);

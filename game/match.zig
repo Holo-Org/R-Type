@@ -36,15 +36,7 @@ pub const Settings = struct {
     seed: u64,
 };
 
-pub const Phase = enum {
-    /// Nobody is connected: the next Player to connect begins a Match.
-    waiting,
-    /// Ships appear as their Players join, and can move and fire. No Waves.
-    join_window,
-    playing,
-    /// No Ship is left; a new join window opens when the pause ends.
-    game_over,
-};
+pub const Phase = protocol.Phase;
 
 /// A Player of the Match, as the Server knows it: their Ship, if they still
 /// have one, is in the World.
@@ -197,18 +189,27 @@ pub const Match = struct {
         return events;
     }
 
-    /// Where the Ships are. Protocol v1 (#26) adds every other kind.
+    /// Where every entity stands, for the Server to send. A Ship destroyed
+    /// this Tick is left out: the "Ship destroyed" Announcement tells of it.
     pub fn snapshot(m: *Match) protocol.Snapshot {
-        var s: protocol.Snapshot = .{ .tick = m.tick };
+        var s: protocol.Snapshot = .{ .tick = m.tick, .phase = m.phase };
+        if (m.phase == .join_window or m.phase == .game_over) s.phase_ends = m.phase_ends;
         const ships = &m.world.ships;
-        for (ships.items(.player), ships.items(.position), ships.items(.hit_points)) |player, position, hit_points| {
+        for (ships.items(.player), ships.items(.position), ships.items(.hit_points), ships.items(.invulnerable)) |player, position, hit_points, invulnerable| {
             if (hit_points == 0) continue;
-            s.add(.{
+            s.ships.add(.{
                 .player = player,
-                // Kept on screen by moveShips(), which fits in a u16.
-                .x = @intFromFloat(@round(position.x)),
-                .y = @intFromFloat(@round(position.y)),
+                .x = protocol.coordinate(position.x),
+                .y = protocol.coordinate(position.y),
+                .hit_points = hit_points,
+                .flags = .{ .invulnerable = invulnerable > 0 },
             });
+        }
+        inline for (.{ "ship_projectiles", "darts", "pods", "enemy_projectiles" }) |name| {
+            const table = &@field(m.world, name);
+            for (table.liveIds(), table.items(.position)) |id, position| {
+                @field(s, name).add(.{ .id = id, .x = protocol.coordinate(position.x), .y = protocol.coordinate(position.y) });
+            }
         }
         return s;
     }
@@ -600,9 +601,30 @@ test "Ships move with the newest input and stay on screen" {
     m.receive(0, inputOf(2, .{ .left = true, .up = true }));
     m.receive(0, inputOf(1, .{ .right = true })); // older: ignored
     _ = run(&m, 100);
-    const ship = m.snapshot().shipSlice()[0];
+    const ship = m.snapshot().ships.slice()[0];
     try testing.expectEqual(0, ship.x);
     try testing.expectEqual(0, ship.y);
+}
+
+test "a Snapshot holds every kind of entity, and the phase" {
+    var m = started(2, 1);
+    _ = m.world.darts.spawn(.{ .position = .{ .x = -10.4, .y = 20 }, .velocity = .{ .x = 0, .y = 0 }, .wave_y = 20, .age = 0, .hit_points = 1 }).?;
+    _ = m.world.enemy_projectiles.spawn(.{ .position = .{ .x = 30, .y = 40.6 }, .velocity = .{ .x = 0, .y = 0 }, .used = false }).?;
+    m.world.ships.items(.hit_points)[1] = 0; // destroyed this Tick
+    m.world.ships.items(.invulnerable)[0] = 5;
+
+    const s = m.snapshot();
+    try testing.expectEqual(.join_window, s.phase);
+    try testing.expectEqual(m.phase_ends, s.phase_ends);
+    try testing.expectEqual(1, s.ships.len);
+    try testing.expectEqual(protocol.ShipState{ .player = 0, .x = 64, .y = 90, .hit_points = 3, .flags = .{ .invulnerable = true } }, s.ships.slice()[0]);
+    try testing.expectEqual(protocol.EntityState{ .id = m.world.darts.liveIds()[0], .x = -10, .y = 20 }, s.darts.slice()[0]);
+    try testing.expectEqual(protocol.EntityState{ .id = m.world.enemy_projectiles.liveIds()[0], .x = 30, .y = 41 }, s.enemy_projectiles.slice()[0]);
+    try testing.expectEqual(0, s.pods.len + s.ship_projectiles.len);
+
+    _ = run(&m, m.settings.join_window);
+    try testing.expectEqual(.playing, m.snapshot().phase);
+    try testing.expectEqual(0, m.snapshot().phase_ends);
 }
 
 test "a silent Player is dropped after three seconds" {

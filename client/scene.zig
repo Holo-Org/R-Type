@@ -1,6 +1,6 @@
-//! What the Client draws of the Match at one Server Tick: the Scene. Only
-//! the conversions at the bottom know where it comes from, a Snapshot or,
-//! with `--demo`, a Match run inside the Client; the drawing reads nothing else.
+//! What the Client draws of the Match at one Server Tick: the Scene. It comes
+//! from a Snapshot, the Server's or, with `--demo`, that of a Match run inside
+//! the Client; only `fromSnapshot` knows the wire format.
 
 const std = @import("std");
 const game = @import("game");
@@ -17,8 +17,7 @@ pub const Position = game.world.Position;
 pub const Ship = struct {
     player: u8,
     position: Position,
-    /// Null until Snapshots carry them (#26).
-    hit_points: ?u8,
+    hit_points: u8,
     invulnerable: bool,
 };
 
@@ -78,38 +77,26 @@ pub const Scene = struct {
         return std.math.divCeil(u32, ticks, tick_rate) catch unreachable;
     }
 
-    /// The Ships, as a Snapshot gives them today. Protocol v1 (#26) adds the
-    /// phase, hit points and every other kind of entity.
     pub fn fromSnapshot(snapshot: *const protocol.Snapshot) Scene {
-        var scene: Scene = .{ .tick = snapshot.tick };
-        for (snapshot.shipSlice()) |ship| scene.ships.append(.{
+        var scene: Scene = .{ .tick = snapshot.tick, .phase = snapshot.phase, .phase_ends = snapshot.phase_ends };
+        for (snapshot.ships.slice()) |ship| scene.ships.append(.{
             .player = ship.player,
-            .position = .{ .x = @floatFromInt(ship.x), .y = @floatFromInt(ship.y) },
-            .hit_points = null,
-            .invulnerable = false,
+            .position = position(ship.x, ship.y),
+            .hit_points = ship.hit_points,
+            .invulnerable = ship.flags.invulnerable,
         });
-        return scene;
-    }
-
-    /// Everything a Snapshot of protocol v1 will hold, read straight from a
-    /// Match's World, for `--demo`.
-    pub fn fromMatch(match: *game.match.Match) Scene {
-        var scene: Scene = .{ .tick = match.tick, .phase = match.phase };
-        if (match.phase == .join_window or match.phase == .game_over) scene.phase_ends = match.phase_ends;
-        const w = &match.world;
-        for (w.ships.items(.player), w.ships.items(.position), w.ships.items(.hit_points), w.ships.items(.invulnerable)) |player, position, hit_points, invulnerable| {
-            if (hit_points == 0) continue; // destroyed this Tick, as in a Snapshot
-            scene.ships.append(.{ .player = player, .position = position, .hit_points = hit_points, .invulnerable = invulnerable > 0 });
-        }
         inline for (.{ .{ "darts", "darts" }, .{ "pods", "pods" }, .{ "bolts", "ship_projectiles" }, .{ "orbs", "enemy_projectiles" } }) |pair| {
-            const table = &@field(w, pair[1]);
-            for (table.liveIds(), table.items(.position)) |id, position| {
-                @field(scene, pair[0]).append(.{ .id = id, .position = position });
+            for (@field(snapshot, pair[1]).slice()) |entity| {
+                @field(scene, pair[0]).append(.{ .id = entity.id, .position = position(entity.x, entity.y) });
             }
         }
         return scene;
     }
 };
+
+pub fn position(x: i16, y: i16) Position {
+    return .{ .x = @floatFromInt(x), .y = @floatFromInt(y) };
+}
 
 /// Where Ships' Projectiles hit Enemies between two Scenes: each one that
 /// vanished short of the right edge, at its front. Nothing hits when the world
@@ -176,7 +163,7 @@ test "a Projectile that vanishes short of the right edge has hit" {
     try testing.expectEqual(0, hits(&before, &game_over, &buffer).len);
 }
 
-test "a Scene from a Match holds every kind, and leaves destroyed Ships out" {
+test "a Scene from a Snapshot holds every kind, and the phase" {
     var match: game.match.Match = .init(.{ .seed = 3 });
     _ = try match.join(.loopback(1));
     _ = try match.join(.loopback(2));
@@ -185,7 +172,7 @@ test "a Scene from a Match holds every kind, and leaves destroyed Ships out" {
     match.world.ships.items(.hit_points)[1] = 0;
     match.world.ships.items(.invulnerable)[0] = 5;
 
-    const scene: Scene = .fromMatch(&match);
+    const scene: Scene = .fromSnapshot(&match.snapshot());
     try testing.expectEqual(.join_window, scene.phase);
     try testing.expectEqual(5, scene.secondsLeft());
     try testing.expectEqual(1, scene.ships.len);
@@ -193,13 +180,4 @@ test "a Scene from a Match holds every kind, and leaves destroyed Ships out" {
     try testing.expectEqual(3, scene.ships.slice()[0].hit_points);
     try testing.expectEqual(1, scene.darts.len);
     try testing.expectEqual(Position{ .x = 30, .y = 40 }, scene.orbs.slice()[0].position);
-}
-
-test "a Scene from today's Snapshot holds the Ships" {
-    var snapshot: protocol.Snapshot = .{ .tick = 9 };
-    snapshot.add(.{ .player = 2, .x = 64, .y = 90 });
-    const scene: Scene = .fromSnapshot(&snapshot);
-    try testing.expectEqual(1, scene.ships.len);
-    try testing.expectEqual(Position{ .x = 64, .y = 90 }, scene.ships.slice()[0].position);
-    try testing.expectEqual(null, scene.ships.slice()[0].hit_points);
 }

@@ -3,7 +3,8 @@
 //!
 //! Two threads: the Engine's network thread receives datagrams into the
 //! transport's inbox, and the main thread runs the 60 Hz Tick loop, which
-//! drains the inbox, advances the Match and sends every Player a snapshot.
+//! drains the inbox, advances the Match, and sends every Player what the Tick
+//! announced, then a snapshot.
 //! Logs go to stderr, unbuffered, so they show up at once even when redirected.
 
 const std = @import("std");
@@ -91,11 +92,20 @@ const Server = struct {
         var dropped = events.timed_out.iterator(.{});
         while (dropped.next()) |player| {
             log(s.io, "Tick {d}: Player {d} timed out", .{ s.match.tick, player + 1 });
-            s.tellEveryone(.{ .player_left = .{ .player = @intCast(player) } });
+            s.announce(.{ .player_timed_out = .{ .player = @intCast(player) } });
         }
-        // Protocol v1 (#26) announces these, and explosions, to the Clients.
-        for (events.shipDestroyedSlice()) |ship| log(s.io, "Tick {d}: Player {d}'s Ship destroyed", .{ s.match.tick, ship.player + 1 });
-        if (events.game_over) log(s.io, "Tick {d}: game over", .{s.match.tick});
+        // Sent without a delivery guarantee until the reliable channel (#28).
+        for (events.explosionSlice()) |at| {
+            s.announce(.{ .explosion = .{ .x = protocol.coordinate(at.x), .y = protocol.coordinate(at.y) } });
+        }
+        for (events.shipDestroyedSlice()) |ship| {
+            log(s.io, "Tick {d}: Player {d}'s Ship destroyed", .{ s.match.tick, ship.player + 1 });
+            s.announce(.{ .ship_destroyed = .{ .player = ship.player, .x = protocol.coordinate(ship.position.x), .y = protocol.coordinate(ship.position.y) } });
+        }
+        if (events.game_over) {
+            log(s.io, "Tick {d}: game over", .{s.match.tick});
+            s.announce(.game_over);
+        }
         s.tellEveryone(.{ .snapshot = s.match.snapshot() });
         if (s.match.tick % (5 * tick_rate) == 0) s.report();
     }
@@ -116,32 +126,42 @@ const Server = struct {
                 if (player) |p| s.leave(p) else s.ignored += 1;
             },
             // Messages only the Server sends.
-            .accept, .reject, .snapshot, .player_left => s.ignored += 1,
+            .accept, .refusal, .snapshot, .announcement => s.ignored += 1,
         }
     }
 
     fn connect(s: *Server, peer: net.Endpoint) void {
         const known = s.match.find(peer) != null;
         const player = s.match.join(peer) catch |err| {
-            // Protocol v1 (#26) adds a reason for a Match that already started.
-            s.send(peer, .{ .reject = .{ .reason = .match_full } });
+            s.send(peer, .{ .refusal = .{ .reason = switch (err) {
+                error.MatchFull => .match_full,
+                error.AlreadyStarted => .already_started,
+            } } });
             if (!known) log(s.io, "Tick {d}: refused {f}: {t}", .{ s.match.tick, peer, err });
             return;
         };
-        if (!known) log(s.io, "Tick {d}: Player {d} joined from {f}", .{ s.match.tick, player + 1, peer });
         s.send(peer, .{ .accept = .{ .player = player } });
+        if (!known) {
+            log(s.io, "Tick {d}: Player {d} joined from {f}", .{ s.match.tick, player + 1, peer });
+            s.announce(.{ .player_joined = .{ .player = player } });
+        }
     }
 
     fn leave(s: *Server, player: u8) void {
         s.match.leave(player);
         log(s.io, "Tick {d}: Player {d} left", .{ s.match.tick, player + 1 });
-        s.tellEveryone(.{ .player_left = .{ .player = player } });
+        s.announce(.{ .player_left = .{ .player = player } });
     }
 
     fn send(s: *Server, to: net.Endpoint, message: protocol.Message) void {
         s.sequence +%= 1;
         const encoded = protocol.encode(.{ .sequence = s.sequence, .message = message });
         s.transport.send(to, encoded.bytes());
+    }
+
+    /// Tells every Player of something that happened this Tick.
+    fn announce(s: *Server, event: protocol.Announcement.Event) void {
+        s.tellEveryone(.{ .announcement = .{ .tick = s.match.tick, .event = event } });
     }
 
     fn tellEveryone(s: *Server, message: protocol.Message) void {
