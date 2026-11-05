@@ -17,6 +17,16 @@ pub fn drawStatus(frame: *engine.Frame, text: []const u8, color: engine.Color) v
     frame.drawText(text, margin, 12, 20, color);
 }
 
+/// Why the Client is not in a Match, in the middle of the Star-field.
+pub fn drawWaiting(frame: *engine.Frame, text: []const u8) void {
+    drawCentred(frame, text, 340, 30, .white);
+}
+
+/// The first Esc's question, near the top of the screen.
+pub fn drawLeavePrompt(frame: *engine.Frame) void {
+    drawCentred(frame, "Press Esc again to leave the Match", 60, 30, .white);
+}
+
 /// "Player N" in the Player's colour, so that each Player knows their Ship,
 /// or "Player N: destroyed" once their Ship is.
 pub fn drawPlayer(frame: *engine.Frame, player: u8, destroyed: bool) void {
@@ -72,7 +82,7 @@ pub fn drawHeartBar(frame: *engine.Frame, players: PlayerSet, scene: *const Scen
         const ship = for (scene.ships.slice()) |ship| {
             if (ship.player == player) break ship;
         } else continue; // destroyed
-        const hit_points = ship.hit_points orelse continue; // not in today's Snapshots
+        const hit_points = ship.hit_points;
         var x: f32 = margin + 36;
         for (0..@min(hit_points, max_hearts)) |_| {
             drawHeart(frame, x, @floatFromInt(y), color);

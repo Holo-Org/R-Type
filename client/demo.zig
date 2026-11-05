@@ -1,5 +1,5 @@
-//! `--demo <seed>`: a Match run inside the Client, with no Server, to see
-//! everything the Client draws before Snapshots carry it (#26). Player 1
+//! `--demo <seed>`: a Match run inside the Client, with no Server, drawn from
+//! its Snapshots as a Server's would be. Player 1
 //! plays from the keyboard, or `--script`; Players 2 to 4 fly scripted
 //! patterns and fire in bursts, so that Enemies get through now and then and
 //! the Match reaches game over. The same seed plays the same Waves.

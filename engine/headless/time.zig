@@ -4,6 +4,11 @@
 const std = @import("std");
 const Io = std.Io;
 
+/// Now, on the monotonic clock `FixedStep` steps on.
+pub fn timestamp(io: Io) Io.Timestamp {
+    return FixedStep.clock.now(io);
+}
+
 pub const FixedStep = struct {
     io: Io,
     step: Io.Duration,

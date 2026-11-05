@@ -65,6 +65,25 @@ pub const View = struct {
         return true;
     }
 
+    /// Whether `player`'s Ship is in play: in the join window or during
+    /// play, and not destroyed.
+    pub fn shipAlive(view: *const View, player: ?u8) bool {
+        const me = player orelse return false;
+        if (view.scene.phase != .join_window and view.scene.phase != .playing) return false;
+        for (view.scene.ships.slice()) |ship| {
+            if (ship.player == me) return true;
+        }
+        return false;
+    }
+
+    /// Forgets the Match, for a Client that lost its Server: only the
+    /// Star-field is left.
+    pub fn clear(view: *View) void {
+        view.scene = .{ .phase = .waiting };
+        view.effects = .empty;
+        view.players = .empty;
+    }
+
     /// An Enemy destroyed at `position`, its top-left corner: the explosion
     /// Announcement. Call it before showing the Scene it vanished from, so
     /// that it is still there to tell its size.
@@ -167,6 +186,21 @@ test "a destroyed Player stays listed until the next join window" {
     try testing.expectEqual(2, view.players.count());
     view.show(.{ .phase = .join_window });
     try testing.expectEqual(0, view.players.count());
+}
+
+test "a Ship is alive in the join window and in play, until destroyed" {
+    var view: View = .{ .sprites = undefined, .starfield = undefined };
+    var playing: Scene = .{ .phase = .playing };
+    playing.ships.append(shipOf(1));
+    view.show(playing);
+    try testing.expect(view.shipAlive(1));
+    try testing.expect(!view.shipAlive(0));
+    try testing.expect(!view.shipAlive(null));
+    view.show(.{ .phase = .game_over });
+    try testing.expect(!view.shipAlive(1));
+    view.clear();
+    try testing.expectEqual(0, view.players.count());
+    try testing.expectEqual(.waiting, view.scene.phase);
 }
 
 test "hits and Announcements start the Client's own effects" {

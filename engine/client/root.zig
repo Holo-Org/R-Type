@@ -42,7 +42,7 @@ pub const Rect = struct {
 
 /// A key, named after where it sits on a US (QWERTY) keyboard, whatever the
 /// layout: on an AZERTY keyboard, `.w` is the key marked Z. Escape is left
-/// out, since it closes the Window.
+/// out: it cannot be bound, and programs read it with `Window.escapePressed`.
 pub const Key = enum {
     // zig fmt: off
     a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z,
@@ -162,6 +162,8 @@ pub const Window = struct {
         rl.initWindow(width, height, title);
         if (!rl.isWindowReady()) return error.WindowUnavailable;
         rl.setTargetFPS(target_fps);
+        // Escape is the program's to read: only the close button closes the window.
+        rl.setExitKey(.null);
         return .{};
     }
 
@@ -172,6 +174,11 @@ pub const Window = struct {
 
     pub fn shouldClose(_: *const Window) bool {
         return rl.windowShouldClose();
+    }
+
+    /// Whether Escape went down since the previous Frame.
+    pub fn escapePressed(_: *const Window) bool {
+        return rl.isKeyPressed(.escape);
     }
 
     /// Seconds taken by the previous Frame.
