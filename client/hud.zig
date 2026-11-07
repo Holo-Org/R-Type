@@ -17,6 +17,15 @@ pub fn drawStatus(frame: *engine.Frame, text: []const u8, color: engine.Color) v
     frame.drawText(text, margin, 12, 20, color);
 }
 
+/// The Connection's round trip, and the share of the Server's datagrams
+/// lost, in the top-right corner: lag shows as a number, not only as
+/// movement.
+pub fn drawNetwork(frame: *engine.Frame, round_trip_ms: i64, lost_percent: f64) void {
+    var buffer: [48]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "{d} ms, {d:.1}% lost", .{ round_trip_ms, lost_percent }) catch unreachable;
+    frame.drawText(text, screen_width - margin - frame.measureText(text, 20), 12, 20, .white);
+}
+
 /// Why the Client is not in a Match, in the middle of the Star-field.
 pub fn drawWaiting(frame: *engine.Frame, text: []const u8) void {
     drawCentred(frame, text, 340, 30, .white);
