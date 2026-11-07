@@ -10,6 +10,7 @@
 # Reference
 
 - [Protocol](protocol.md)
+- [Network measurements](measurements.md)
 - [Glossary](glossary.md)
 
 # Decisions
