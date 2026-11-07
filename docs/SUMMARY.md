@@ -2,6 +2,11 @@
 
 [R-Type](introduction.md)
 
+# Guides
+
+- [Developer guide](developer.md)
+- [Accessibility](accessibility.md)
+
 # Reference
 
 - [Protocol](protocol.md)
