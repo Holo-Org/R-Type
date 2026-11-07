@@ -7,6 +7,12 @@ zig-out/
 # always uses <build root>/zig-pkg, and no option or variable moves it
 zig-pkg/
 
+# The docs site's output, and the Mermaid scripts `mdbook-mermaid install .`
+# writes next to book.toml
+book/
+mermaid.min.js
+mermaid-init.js
+
 # Editors and language servers
 .vscode/
 .idea/
