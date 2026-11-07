@@ -1,0 +1,66 @@
+# Measures a 20-Player session under Kick-off 2's test conditions, with
+# netem on the runner's loopback (.github/scripts/measure.sh), and keeps the
+# logs, the CSV files and summary.md as an artifact. The table also goes to
+# the run's summary page.
+#
+# It takes about eight minutes, so it runs only when the measurement itself
+# changes, and by hand.
+
+name: Measure
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/measure.yml
+      - .github/scripts/measure.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Measure under netem
+    # Not ubuntu-latest: the apt package names below are those of 24.04, and
+    # netem on loopback was seen working there.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The Client is built too, and links raylib's X11 and OpenGL libraries.
+      - name: Install raylib's X11 and OpenGL development packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libgl-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev
+
+      - uses: mlugg/setup-zig@v2.2.1
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe
+
+      # The runner's cloud kernel may only ship sch_netem in its -extra package.
+      - name: Load netem
+        run: |
+          sudo modprobe sch_netem || {
+            sudo apt-get install --yes "linux-modules-extra-$(uname -r)"
+            sudo modprobe sch_netem
+          }
+
+      - name: Measure
+        run: .github/scripts/measure.sh measurements 60
+
+      - name: Show the results
+        if: always()
+        run: |
+          if [ -f measurements/summary.md ]; then
+            cat measurements/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: measurements
+          path: measurements/
