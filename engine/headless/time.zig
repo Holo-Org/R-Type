@@ -48,9 +48,14 @@ pub const FixedStep = struct {
     }
 
     /// Sleeps until at least one step is due, then returns how many are.
+    /// The clock's wait can return a little early, as on Windows' runners:
+    /// it then waits again, so that the answer is never 0.
     pub fn wait(s: *FixedStep) Io.Cancelable!u32 {
-        try s.next.withClock(clock).wait(s.io);
-        return s.poll();
+        while (true) {
+            try s.next.withClock(clock).wait(s.io);
+            const due = s.poll();
+            if (due > 0) return due;
+        }
     }
 };
 
