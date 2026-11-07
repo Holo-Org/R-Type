@@ -1,0 +1,25 @@
+# The docs site, built with mdBook from docs/ (docs/SUMMARY.md lists its
+# pages) and published to GitHub Pages by .github/workflows/docs.yml.
+#
+# Diagrams are Mermaid, drawn in the browser by mdbook-mermaid's two scripts,
+# which `mdbook-mermaid install .` writes next to this file. They are not
+# committed: run that command once before `mdbook build` or `mdbook serve`.
+
+[book]
+title = "R-Type"
+authors = ["Renaud Manet", "Loïs Maumenée", "Alex Guibert"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "book"
+# A page listed in SUMMARY.md but missing is an error, not a new empty file.
+create-missing = false
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html]
+git-repository-url = "https://github.com/Holo-Org/R-Type"
+edit-url-template = "https://github.com/Holo-Org/R-Type/edit/main/{path}"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
