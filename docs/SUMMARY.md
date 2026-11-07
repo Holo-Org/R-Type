@@ -4,6 +4,7 @@
 
 # Reference
 
+- [Protocol](protocol.md)
 - [Glossary](glossary.md)
 
 # Decisions
