@@ -15,7 +15,7 @@ version = 1
 
 # Every directory that holds Zig code. A new one must be added here.
 [checks.fmt]
-command = ["zig", "fmt", "--check", "build.zig", "build.zig.zon", "engine", "game", "server", "client"]
+command = ["zig", "fmt", "--check", "build.zig", "build.zig.zon", "engine", "game", "server", "client", "bot"]
 requires = ["zig"]
 stages = ["push", "ci"]
 
