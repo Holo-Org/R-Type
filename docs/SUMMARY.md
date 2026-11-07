@@ -14,6 +14,13 @@
 
 # Decisions
 
+- [Comparative study](study/README.md)
+  - [Language](study/language.md)
+  - [Libraries](study/libraries.md)
+  - [Networking](study/networking.md)
+  - [Algorithms and data structures](study/data-structures.md)
+  - [Storage](study/storage.md)
+  - [Security](study/security.md)
 - [Architecture decision records](adr/README.md)
   - [0001: Engine and Game are separate](adr/0001-engine-game-boundary.md)
   - [0002: Snapshots, plus a small reliable channel](adr/0002-snapshots-and-a-reliable-channel.md)
