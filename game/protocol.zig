@@ -43,7 +43,9 @@ const ByteReader = bytes.ByteReader;
 const ByteWriter = bytes.ByteWriter;
 
 pub const protocol_id: u16 = std.mem.readInt(u16, "RT", .little);
-pub const protocol_version: u8 = 1;
+/// 2 since Part 2's header: Part 1's prototype sent version 1 with an 8-byte
+/// header, which this one must not be taken for.
+pub const protocol_version: u8 = 2;
 pub const max_datagram_size = net.max_datagram_size;
 pub const max_players = 4;
 pub const input_history = 3;
@@ -518,7 +520,7 @@ const testing = std.testing;
 /// The header of a packet of type `kind`: sequence 0x0102, ack 0x0304, ack
 /// bits 0x08070605.
 fn headerOf(comptime kind: u8) [12]u8 {
-    return .{ 'R', 'T', 1, kind, 0x02, 0x01, 0x04, 0x03, 0x05, 0x06, 0x07, 0x08 };
+    return .{ 'R', 'T', 2, kind, 0x02, 0x01, 0x04, 0x03, 0x05, 0x06, 0x07, 0x08 };
 }
 
 /// A packet of type `kind` carrying no Announcement.
@@ -543,7 +545,7 @@ fn expectAnnouncement(comptime body: []const u8, event: Announcement.Event) !voi
 
 test "the layout matches the wire format" {
     // An accept for Player 2: the header, the body, and no Announcement.
-    try expectBytes(&.{ 0x52, 0x54, 0x01, 0x02, 0x02, 0x01, 0x04, 0x03, 0x05, 0x06, 0x07, 0x08, 0x02, 0x00 }, .{ .accept = .{ .player = 2 } });
+    try expectBytes(&.{ 0x52, 0x54, 0x02, 0x02, 0x02, 0x01, 0x04, 0x03, 0x05, 0x06, 0x07, 0x08, 0x02, 0x00 }, .{ .accept = .{ .player = 2 } });
     try expectBytes(withHeader(1, &.{0}), .{ .connect = .{} });
     try expectBytes(withHeader(3, &.{1}), .{ .refusal = .{ .reason = .match_full } });
     try expectBytes(withHeader(3, &.{2}), .{ .refusal = .{ .reason = .already_started } });
@@ -675,7 +677,9 @@ test "rejects malformed datagrams" {
     try testing.expectError(error.Truncated, decode(&.{}));
     try testing.expectError(error.Truncated, decode(headerOf(6)[0..11]));
     try testing.expectError(error.BadProtocol, decode(&[_]u8{ 'R', 'X', 1, 6 } ++ [_]u8{0} ** 9));
-    try testing.expectError(error.BadVersion, decode(&[_]u8{ 'R', 'T', 2, 6 } ++ [_]u8{0} ** 9));
+    // Part 1's version, and one from the future.
+    try testing.expectError(error.BadVersion, decode(&[_]u8{ 'R', 'T', 1, 6 } ++ [_]u8{0} ** 9));
+    try testing.expectError(error.BadVersion, decode(&[_]u8{ 'R', 'T', 3, 6 } ++ [_]u8{0} ** 9));
     try testing.expectError(error.UnknownType, decode(withHeader(0, &.{})));
     try testing.expectError(error.UnknownType, decode(withHeader(7, &.{})));
     try testing.expectError(error.Truncated, decode(&headerOf(2)));
