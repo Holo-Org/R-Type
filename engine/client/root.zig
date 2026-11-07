@@ -333,6 +333,11 @@ pub const Sound = struct {
         rl.playSound(sound.raylib());
     }
 
+    /// From 0, silent, to 1, as loaded; every later `play` keeps it.
+    pub fn setVolume(sound: *const Sound, volume: f32) void {
+        rl.setSoundVolume(sound.raylib(), std.math.clamp(volume, 0, 1));
+    }
+
     pub fn unload(sound: *const Sound) void {
         rl.unloadSound(sound.raylib());
     }

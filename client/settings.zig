@@ -15,7 +15,29 @@ pub const Settings = struct {
         .right = &.{ .{ .key = .right }, .{ .gamepad = .dpad_right }, .{ .gamepad = .left_stick_right } },
         .fire = &.{ .{ .key = .space }, .{ .gamepad = .face_down } },
     },
+    /// Fire toggles firing on and off rather than being held.
+    auto_fire: bool = false,
+    /// From 0, silent, to 1; values beyond are clamped.
+    effects_volume: f32 = 1.0,
+
+    /// Whether the Ship fires, from whether it fired the Tick before, and
+    /// whether fire is held now and was the Tick before. Without auto-fire,
+    /// firing is holding fire.
+    pub fn firing(settings: *const Settings, was_firing: bool, held: bool, held_before: bool) bool {
+        if (!settings.auto_fire) return held;
+        return if (held and !held_before) !was_firing else was_firing;
+    }
 };
+
+test "auto-fire toggles on each press" {
+    const toggled: Settings = .{ .auto_fire = true };
+    try std.testing.expect(toggled.firing(false, true, false)); // pressed: on
+    try std.testing.expect(toggled.firing(true, true, true)); // held: still on
+    try std.testing.expect(toggled.firing(true, false, true)); // released: still on
+    try std.testing.expect(!toggled.firing(true, true, false)); // pressed again: off
+    const held: Settings = .{};
+    try std.testing.expect(held.firing(false, true, true) and !held.firing(true, false, true));
+}
 
 /// The file written for the Player when there is none: `Settings{}`, with
 /// comments explaining each setting.

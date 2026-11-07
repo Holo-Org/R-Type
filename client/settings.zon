@@ -35,4 +35,12 @@
         .right = .{ .{ .key = .right }, .{ .gamepad = .dpad_right }, .{ .gamepad = .left_stick_right } },
         .fire = .{ .{ .key = .space }, .{ .gamepad = .face_down } },
     },
+
+    // With auto-fire on, pressing fire once starts firing and pressing it
+    // again stops, so there is no key or button to hold.
+    .auto_fire = false,
+
+    // The sound effects' volume, from 0.0 (silent) to 1.0 (full). Every
+    // sound goes with something on screen, so none is missed without them.
+    .effects_volume = 1.0,
 }
