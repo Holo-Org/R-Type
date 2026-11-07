@@ -13,7 +13,10 @@
 //! - `next` hands the messages received over in sending order: a later one
 //!   waits for an earlier one, and a message received twice is handed once;
 //! - at most `window` messages wait for an acknowledgement: `send` refuses
-//!   one more, and the Connection then counts as timed out.
+//!   one more, and the Connection then counts as timed out;
+//! - `traffic` tells what the channel has seen of the Connection: the round
+//!   trip, the datagrams received, lost, duplicated and late, and those sent
+//!   that no acknowledgement ever covered.
 //!
 //! What the messages mean, and how they are encoded, is the program's: a
 //! message is any value of its `Message` type. `Header` and `Numbered` encode
@@ -78,6 +81,12 @@ pub fn Channel(comptime Message: type) type {
         round_trip: Io.Duration = initial_round_trip,
         /// Messages put into a datagram again, since the channel was made.
         resent: u64 = 0,
+        /// Datagrams sent, since the channel was made.
+        datagrams_sent: u64 = 0,
+        /// Datagrams sent that no acknowledgement covered before the channel
+        /// forgot them, `datagram_history` datagrams later: lost on the way,
+        /// or every acknowledgement of them was.
+        unacknowledged: u64 = 0,
 
         // Receiving.
         received: Received = .{},
@@ -140,6 +149,8 @@ pub fn Channel(comptime Message: type) type {
                 count += 1;
                 ids |= @as(u32, 1) << @intCast(offset);
             }
+            c.datagrams_sent += 1;
+            if (c.sent[sequence % datagram_history].valid) c.unacknowledged += 1;
             c.sent[sequence % datagram_history] = .{
                 .valid = true,
                 .sequence = sequence,
@@ -186,6 +197,20 @@ pub fn Channel(comptime Message: type) type {
             return entry.message;
         }
 
+        /// What the channel has measured of the Connection so far.
+        pub fn traffic(c: *const Self) Traffic {
+            const r = &c.received;
+            return .{
+                .round_trip = c.round_trip,
+                .received = r.count,
+                .lost = r.span - @min(r.span, r.count),
+                .duplicated = r.duplicates,
+                .late = r.late,
+                .sent = c.datagrams_sent,
+                .unacknowledged = c.unacknowledged,
+            };
+        }
+
         fn acknowledge(c: *Self, now: Io.Timestamp, sequence: u16) void {
             const sent = &c.sent[sequence % datagram_history];
             if (!sent.valid or sent.sequence != sequence) return; // never sent, already acknowledged, or forgotten
@@ -202,12 +227,55 @@ pub fn Channel(comptime Message: type) type {
     };
 }
 
-/// The sequence numbers received: the latest, and which of the 32 before it.
+/// What a channel has measured of its Connection, both ways, since it was
+/// made. Each end counts the datagrams it receives; of those it sends, it
+/// only knows what the acknowledgements tell.
+pub const Traffic = struct {
+    /// Smoothed, as `Channel.round_trip`.
+    round_trip: Io.Duration,
+    /// Datagrams received, each counted once.
+    received: u64,
+    /// Sequence numbers between the first datagram received and the latest
+    /// that have not arrived: lost, or still on their way.
+    lost: u64,
+    /// Datagrams received again.
+    duplicated: u64,
+    /// Datagrams received after a later one.
+    late: u64,
+    sent: u64,
+    /// See `Channel.unacknowledged`.
+    unacknowledged: u64,
+};
+
+/// The sequence numbers received: the latest, and which of the 32 before it,
+/// for the acknowledgements; and how many, for `Traffic`.
 const Received = struct {
     latest: u16 = 0,
     bits: u32 = 0,
+    /// Distinct datagrams received.
+    count: u64 = 0,
+    /// Sequence numbers from the first datagram received to the latest.
+    span: u64 = 0,
+    duplicates: u64 = 0,
+    late: u64 = 0,
 
     fn note(r: *Received, sequence: u16) void {
+        if (r.count == 0) {
+            // The first datagram starts the counts: the peer may have sent
+            // others before this end existed, such as a Client's connects.
+            r.span = 1;
+        } else if (isNewer(sequence, r.latest)) {
+            r.span += sequence -% r.latest;
+        } else {
+            const behind = r.latest -% sequence;
+            const seen = behind == 0 or (behind <= 32 and r.bits & @as(u32, 1) << @intCast(behind - 1) != 0);
+            if (seen) {
+                r.duplicates += 1;
+                return;
+            }
+            r.late += 1;
+        }
+        r.count += 1;
         if (isNewer(sequence, r.latest)) {
             const ahead = sequence -% r.latest;
             // The old latest becomes bit `ahead - 1`, if it is still among the 32.
@@ -291,6 +359,32 @@ test "the window's worth of unacknowledged messages times the Connection out" {
     var a: TestChannel = .{};
     for (0..window) |n| try a.send(@intCast(n));
     try testing.expectError(error.TimedOut, a.send(window));
+}
+
+test "the receiving end counts the datagrams lost, duplicated and late" {
+    var b: TestChannel = .{};
+    for ([_]u16{ 3, 4, 6, 4, 9, 5 }) |sequence| {
+        b.incoming(at(0), .{ .sequence = sequence, .ack = 0, .ack_bits = 0 }, &.{});
+    }
+    const traffic = b.traffic();
+    try testing.expectEqual(5, traffic.received); // 3, 4, 6, 9 and 5
+    try testing.expectEqual(1, traffic.duplicated); // 4, again
+    try testing.expectEqual(1, traffic.late); // 5, after 6
+    try testing.expectEqual(2, traffic.lost); // 7 and 8; 1 and 2 came before the first one received
+}
+
+test "the sending end counts the datagrams no acknowledgement covered" {
+    var a: TestChannel = .{};
+    var b: TestChannel = .{};
+    var room: [4]TestChannel.Entry = undefined;
+    _ = a.outgoing(at(0), &room); // lost
+    deliver(&a, &b, at(0));
+    deliver(&b, &a, at(10)); // acknowledges a's second datagram only
+    for (0..datagram_history) |_| _ = a.outgoing(at(20), &room);
+    const traffic = a.traffic();
+    try testing.expectEqual(2 + datagram_history, traffic.sent);
+    // The first is forgotten unacknowledged; the newer ones are not forgotten yet.
+    try testing.expectEqual(1, traffic.unacknowledged);
 }
 
 test "acknowledgements cover the latest datagram and the 32 before it, across wrapping" {
