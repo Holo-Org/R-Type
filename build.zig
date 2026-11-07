@@ -1,10 +1,11 @@
-//! R-Type: the Engine, the Game, and the two programs built on them.
+//! R-Type: the Engine, the Game, the two programs built on them, and the
+//! bot that load-tests the Server.
 //!
 //! ADR 0001 (docs/adr/0001-engine-game-boundary.md) in Zig terms. Each part
 //! is a module, and a module can only `@import` the modules this file adds to
 //! its import table (and files inside its own directory). The imports are:
 //!
-//!   engine_headless  <-  game  <-  r-type_server
+//!   engine_headless  <-  game  <-  r-type_server, r-type_bot
 //!         ^               ^
 //!   engine_client (raylib)   <-  r-type_client
 //!
@@ -81,22 +82,37 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(client);
 
-    for ([_]struct { []const u8, *std.Build.Step.Compile }{ .{ "server", server }, .{ "client", client } }) |program| {
+    // Scripted Clients without a window, so headless like the Server.
+    const bot = b.addExecutable(.{
+        .name = "r-type_bot",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bot/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "engine_headless", .module = engine_headless },
+                .{ .name = "game", .module = game },
+            },
+        }),
+    });
+    b.installArtifact(bot);
+
+    for ([_]struct { []const u8, *std.Build.Step.Compile }{ .{ "server", server }, .{ "client", client }, .{ "bot", bot } }) |program| {
         const run = b.addRunArtifact(program[1]);
         if (b.args) |args| run.addArgs(args);
         b.step(program[0], b.fmt("Run {s} (arguments after --)", .{program[1].name})).dependOn(&run.step);
     }
 
     const unit_tests = b.step("test", "Run the unit tests");
-    for ([_]*Module{ engine_headless, game, engine_client, client.root_module, server.root_module }) |module| {
+    for ([_]*Module{ engine_headless, game, engine_client, client.root_module, server.root_module, bot.root_module }) |module| {
         unit_tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = module })).step);
     }
 
     checkLayering(&.{
         .{ .module = raylib, .importers = &.{engine_client}, .why = "raylib stays behind the Engine's client part" },
         .{ .module = engine_client, .importers = &.{client.root_module}, .why = "only the Client program draws: the Server and the Game stay headless" },
-        .{ .module = game, .importers = &.{ server.root_module, client.root_module }, .why = "the Engine knows nothing about the Game" },
-    }, &.{ server.root_module, client.root_module });
+        .{ .module = game, .importers = &.{ server.root_module, client.root_module, bot.root_module }, .why = "the Engine knows nothing about the Game" },
+    }, &.{ server.root_module, client.root_module, bot.root_module });
 }
 
 /// A module, and the only modules that may import it.
