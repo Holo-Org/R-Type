@@ -1,0 +1,72 @@
+# Builds the docs site (book.toml) on every pull request, so a broken page
+# fails the check, and publishes it to GitHub Pages from main.
+
+name: Docs
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MDBOOK_VERSION: v0.5.4
+  MDBOOK_MERMAID_VERSION: v0.17.1
+
+jobs:
+  build:
+    name: Build the docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The release archives each hold a single executable.
+      - name: Install mdBook and mdbook-mermaid
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -sSfL "https://github.com/rust-lang/mdBook/releases/download/$MDBOOK_VERSION/mdbook-$MDBOOK_VERSION-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$bin"
+          curl -sSfL "https://github.com/badboy/mdbook-mermaid/releases/download/$MDBOOK_MERMAID_VERSION/mdbook-mermaid-$MDBOOK_MERMAID_VERSION-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Show the ADRs' status under their title
+        run: |
+          for adr in docs/adr/0*.md; do
+            awk -f .github/scripts/adr-status.awk "$adr" > "$RUNNER_TEMP/adr.md"
+            mv "$RUNNER_TEMP/adr.md" "$adr"
+          done
+
+      - name: Build
+        run: |
+          mdbook-mermaid install .
+          mdbook build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: book
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
