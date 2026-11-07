@@ -95,6 +95,11 @@ pub fn drawHeartBar(frame: *engine.Frame, players: PlayerSet, scene: *const Scen
     }
 }
 
+/// A notice such as "Player 3 left", near the bottom of the screen.
+pub fn drawNotice(frame: *engine.Frame, text: []const u8) void {
+    drawCentred(frame, text, screen_height - 2 * margin - 24, 24, .white);
+}
+
 fn drawCentred(frame: *engine.Frame, text: []const u8, y: i32, size: i32, color: engine.Color) void {
     frame.drawText(text, @divTrunc(screen_width - frame.measureText(text, size), 2), y, size, color);
 }
