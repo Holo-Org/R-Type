@@ -4,7 +4,8 @@
 //!
 //! The Engine's network thread receives the Server's datagrams; the main
 //! thread drains them every Frame, sends one input per Tick whatever the frame
-//! rate, and draws the newest snapshot. Outside a Match, it keeps trying to
+//! rate, and draws the Match a little behind the newest snapshot, moving each
+//! entity between snapshots (interpolation.zig). Outside a Match, it keeps trying to
 //! join and says why it waits. Esc leaves (see leaving.zig). With `--demo`, a
 //! Match runs inside the Client instead, and no Server is needed.
 
@@ -31,6 +32,7 @@ const View = @import("view.zig").View;
 const scene_ = @import("scene.zig");
 const Connection = @import("connection.zig").Connection;
 const Leaving = @import("leaving.zig").Leaving;
+const Interpolation = @import("interpolation.zig").Interpolation;
 
 const usage = "usage: r-type_client [--host <host>] [--port <port>] [--demo <seed>] [--script <n>] [--frames <n> [--screenshot <file.png>]]";
 
@@ -167,6 +169,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
 
     var me: ?u8 = null; // our Player index, once accepted
     var connection: Connection = .init(0);
+    var interpolation: Interpolation = .{};
     var leaving: Leaving = .{};
     var input: protocol.Input = .{};
     var tick: u32 = 0;
@@ -192,6 +195,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                     announce(io, &view, &me, announcement);
                     if (was != null and me == null) { // dropped by the Server
                         link.reset();
+                        interpolation.reset();
                         view.clear();
                         connection.dropped(tick);
                     }
@@ -210,7 +214,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                             if (connection.waiting != before) log(io, "{s}", .{waitingText(connection.waiting.?)});
                         }
                     },
-                    .snapshot => |snapshot| view.show(.fromSnapshot(&snapshot)),
+                    .snapshot => |snapshot| interpolation.push(.fromSnapshot(&snapshot)),
                     // Messages only Clients send.
                     .connect, .input, .disconnect => {},
                 }
@@ -231,6 +235,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                         log(io, "Lost the Server: reconnecting", .{});
                         me = null;
                         link.reset();
+                        interpolation.reset();
                         view.clear();
                     }
                     if (me != null) {
@@ -249,6 +254,10 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
             }
         }
 
+        if (source == .server) {
+            interpolation.advance(window.frameTime());
+            if (interpolation.current()) |scene| view.show(scene);
+        }
         view.advance(window.frameTime());
         if (window.escapePressed() and leaving.escape(view.clock, view.shipAlive(me))) break;
         const last_frame = if (options.frames) |frames| frame_count >= frames else false;
@@ -347,6 +356,7 @@ test {
     _ = @import("effects.zig");
     _ = @import("view.zig");
     _ = @import("connection.zig");
+    _ = @import("interpolation.zig");
     _ = @import("leaving.zig");
     _ = demo_;
 }

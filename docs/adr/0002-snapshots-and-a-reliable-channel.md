@@ -15,7 +15,8 @@ Every Tick, each Client sends its Player's Input, repeating its last few Inputs 
 
 ## Consequences
 
-- K is a Server setting, 1 by default: Clients draw the newest Snapshot as it is, so a larger K shows as jerky movement. In the simulator, 60 Snapshots a second overflowed a 5 KB/s link, and K = 4 fixed it.
+- K is a Server setting, 1 by default. In the simulator, 60 Snapshots a second overflowed a 5 KB/s link, and K = 4 fixed it.
+- Clients draw the Match about two Snapshot intervals behind the newest Snapshot, moving each entity between the two Snapshots around that moment, so a larger K stays smooth. The price is input lag: a Player sees their own Ship that much later, 33 ms at K = 1 and 133 ms at K = 4, which is why K stays 1 by default. In Part 1, Clients drew the newest Snapshot as it was, and a larger K showed as jerky movement.
 - A Snapshot always fits in one datagram: the Server should refuse to create Snapshots bigger than the datagram limit.
 - That refusal is a last resort, counted and logged, that should never trigger: the Game refuses any spawn that would push the next Snapshot past the datagram limit. This is the Snapshot's entity cap. Skipping a Snapshot would freeze every Client, and leaving entities out of one would make Clients read them as destroyed.
-- Interpolation, prediction, delta compression and Snapshots split across datagrams are left for Part 2.
+- Prediction, delta compression and Snapshots split across datagrams are left out. Prediction would first need the Server to apply every Input at its own Tick, where it now keeps only each Player's newest Actions.

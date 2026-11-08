@@ -1,6 +1,7 @@
-//! The Match as the Player sees it: the newest Scene, drawn as it is over the
-//! Star-field, with the Client's own effects and the HUD on top. Frames
-//! follow the Client's clock, not the Server's Ticks.
+//! The Match as the Player sees it: the Scene it is shown, from
+//! interpolation.zig or the demo's Match, drawn over the Star-field, with the
+//! Client's own effects and the HUD on top. Frames follow the Client's clock,
+//! not the Server's Ticks.
 
 const std = @import("std");
 const engine = @import("engine_client");
