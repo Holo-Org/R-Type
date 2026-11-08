@@ -158,12 +158,8 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
         break :no_audio null;
     };
     defer if (audio) |*device| device.close();
-    const samples = sound.synthesizePew();
-    const pew: ?engine.Sound = if (audio) |*device| device.loadSound(&samples, sound.sample_rate) catch |err| no_sound: {
-        log(io, "r-type_client: cannot load the sound ({t})", .{err});
-        break :no_sound null;
-    } else null;
-    defer if (pew) |*p| p.unload();
+    const sounds: Sounds = if (audio) |*device| .load(io, device, settings.effects_volume) else .{};
+    defer sounds.unload();
     var view: View = try .init(&window);
     defer view.deinit();
 
@@ -172,6 +168,8 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
     var interpolation: Interpolation = .{};
     var leaving: Leaving = .{};
     var input: protocol.Input = .{};
+    var fire_held_before = false; // the Tick before, for auto-fire's toggle
+    var firing_ticks: u32 = 0; // since the Ship began firing, to sound each shot
     var tick: u32 = 0;
     var ticks: FixedStep = .init(io, .fromNanoseconds(std.time.ns_per_s / tick_rate));
     switch (source) {
@@ -192,7 +190,7 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                 // The Announcements, before the Scene the entities vanished from.
                 while (link.channel.next()) |announcement| {
                     const was = me;
-                    announce(io, &view, &me, announcement);
+                    announce(io, &view, &sounds, &me, announcement);
                     if (was != null and me == null) { // dropped by the Server
                         link.reset();
                         interpolation.reset();
@@ -223,12 +221,20 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
 
         for (0..ticks.poll()) |_| {
             tick +%= 1;
-            const actions = if (options.script) |pattern| demo_.scriptedActions(pattern, tick) else heldActions(&window, settings);
             const previous = input.recent;
-            input.recent = .{ .{ .tick = tick, .actions = actions }, previous[0], previous[1] };
-            if (actions.fire and !previous[0].actions.fire) {
-                if (pew) |*p| p.play();
+            var actions = if (options.script) |pattern| demo_.scriptedActions(pattern, tick) else heldActions(&window, settings);
+            if (options.script == null) {
+                const held = actions.fire;
+                actions.fire = settings.firing(previous[0].actions.fire, held, fire_held_before);
+                fire_held_before = held;
             }
+            input.recent = .{ .{ .tick = tick, .actions = actions }, previous[0], previous[1] };
+            // A "pew" for each shot: the Ship fires once every `every` Ticks
+            // while fire is on.
+            if (actions.fire) {
+                if (firing_ticks % game.rules.ship_fire.every == 0) sounds.play(.pew);
+                firing_ticks +%= 1;
+            } else firing_ticks = 0;
             switch (source) {
                 .server => |*link| {
                     if (connection.checkLost(tick)) {
@@ -309,23 +315,75 @@ fn waitingText(why: @import("connection.zig").Waiting) []const u8 {
 /// long vanished from the screen.
 const too_late = tick_rate / 4;
 
-/// Logs what concerns the Players, and starts the effects of the visual
-/// Announcements. Comes before the Scene the entities vanished from.
-fn announce(io: Io, view: *View, me: *?u8, announcement: protocol.Announcement) void {
+/// Says what concerns the Players, in the log and on screen, and starts the
+/// effects and sounds of the visual Announcements. Comes before the Scene
+/// the entities vanished from.
+fn announce(io: Io, view: *View, sounds: *const Sounds, me: *?u8, announcement: protocol.Announcement) void {
     const age = view.scene.tick -% announcement.tick;
     const late = age > too_late and age < 1 << 31; // not from a Tick ahead of the Scene
     switch (announcement.event) {
-        .player_joined => |joined| log(io, "Player {d} joined the Match", .{joined.player + 1}),
+        .player_joined => |joined| {
+            log(io, "Player {d} joined the Match", .{joined.player + 1});
+            view.notify("Player {d} joined", .{joined.player + 1});
+        },
         .player_left, .player_timed_out => |gone| {
             const how = if (announcement.event == .player_left) "left" else "timed out";
             log(io, "Player {d} {s}", .{ gone.player + 1, how });
+            view.notify("Player {d} {s}", .{ gone.player + 1, how });
             if (me.* == gone.player) me.* = null; // dropped by the Server: connect again
         },
-        .explosion => |at| if (!late) view.enemyDestroyed(scene_.position(at.x, at.y)),
-        .ship_destroyed => |ship| if (!late) view.shipDestroyed(scene_.position(ship.x, ship.y)),
-        .game_over => log(io, "Game over", .{}),
+        .explosion => |at| if (!late) {
+            view.enemyDestroyed(scene_.position(at.x, at.y));
+            sounds.play(.explosion);
+        },
+        .ship_destroyed => |ship| if (!late) {
+            view.shipDestroyed(scene_.position(ship.x, ship.y));
+            sounds.play(.ship_destroyed);
+        },
+        .game_over => {
+            log(io, "Game over", .{});
+            sounds.play(.game_over);
+        },
     }
 }
+
+/// The sound effects, each null without an audio output or when it failed
+/// to load. Each goes with something on screen (sound.zig).
+const Sounds = struct {
+    pew: ?engine.Sound = null,
+    explosion: ?engine.Sound = null,
+    ship_destroyed: ?engine.Sound = null,
+    game_over: ?engine.Sound = null,
+
+    fn load(io: Io, device: *engine.AudioDevice, volume: f32) Sounds {
+        var sounds: Sounds = .{};
+        inline for (.{
+            .{ "pew", sound.synthesizePew() },
+            .{ "explosion", sound.synthesizeExplosion() },
+            .{ "ship_destroyed", sound.synthesizeShipDestroyed() },
+            .{ "game_over", sound.synthesizeGameOver() },
+        }) |entry| {
+            // raylib copies the samples, so they need not outlive this call.
+            const loaded = device.loadSound(&entry[1], sound.sample_rate) catch |err| no_sound: {
+                log(io, "r-type_client: cannot load the {s} sound ({t})", .{ entry[0], err });
+                break :no_sound null;
+            };
+            if (loaded) |*s| s.setVolume(volume);
+            @field(sounds, entry[0]) = loaded;
+        }
+        return sounds;
+    }
+
+    fn unload(sounds: *const Sounds) void {
+        inline for (@typeInfo(Sounds).@"struct".fields) |field| {
+            if (@field(sounds, field.name)) |*s| s.unload();
+        }
+    }
+
+    fn play(sounds: *const Sounds, comptime which: std.meta.FieldEnum(Sounds)) void {
+        if (@field(sounds, @tagName(which))) |*s| s.play();
+    }
+};
 
 pub fn main(init: std.process.Init) !u8 {
     const io = init.io;

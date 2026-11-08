@@ -31,6 +31,22 @@ pub const View = struct {
     players: PlayerSet = .empty,
     /// Seconds since the View opened: every animation follows it.
     clock: f32 = 0,
+    /// A line shown at the bottom of the screen for a few seconds.
+    notice: Notice = .{},
+
+    pub const Notice = struct {
+        buffer: [48]u8 = undefined,
+        len: usize = 0,
+        /// The View's clock at which it goes.
+        until: f32 = 0,
+
+        pub fn text(notice: *const Notice) []const u8 {
+            return notice.buffer[0..notice.len];
+        }
+    };
+
+    /// How long a notice stays.
+    pub const notice_seconds = 4;
 
     pub fn init(window: *engine.Window) engine.Error!View {
         return .{
@@ -103,6 +119,14 @@ pub const View = struct {
         view.effects.spawn(.explosion, centre);
     }
 
+    /// Shows a line such as "Player 3 left" for `notice_seconds`, replacing
+    /// the one before: what is said in the log is also said on screen.
+    pub fn notify(view: *View, comptime format: []const u8, args: anytype) void {
+        const text = std.fmt.bufPrint(&view.notice.buffer, format, args) catch return;
+        view.notice.len = text.len;
+        view.notice.until = view.clock + notice_seconds;
+    }
+
     /// A Ship destroyed at `position`, its top-left corner: the "Ship
     /// destroyed" Announcement.
     pub fn shipDestroyed(view: *View, position: Position) void {
@@ -135,6 +159,7 @@ pub const View = struct {
         hud.drawHeartBar(frame, view.players, scene);
         hud.drawCountdown(frame, scene);
         hud.drawGameOver(frame, scene);
+        if (view.clock < view.notice.until) hud.drawNotice(frame, view.notice.text());
     }
 
     /// Each entity's animation starts at a moment of its own, from its id,
