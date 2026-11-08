@@ -262,6 +262,11 @@ fn run(gpa: std.mem.Allocator, io: Io, options: Options, settings: *const Settin
                 else
                     waitingText(why);
                 hud.drawWaiting(&frame, text);
+            } else {
+                const traffic = source.server.channel.traffic();
+                const expected = traffic.received + traffic.lost;
+                const lost = if (expected == 0) 0 else 100 * @as(f64, @floatFromInt(traffic.lost)) / @as(f64, @floatFromInt(expected));
+                hud.drawNetwork(&frame, @intCast(@divTrunc(traffic.round_trip.nanoseconds, std.time.ns_per_ms)), lost);
             }
         }
         if (leaving.asking(view.clock)) hud.drawLeavePrompt(&frame);
